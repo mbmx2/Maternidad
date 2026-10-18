@@ -1,0 +1,34 @@
+LEEME — WINDOWS (P8 / Plan T10)
+===============================
+
+ARRANQUE
+1. Doble clic en "Iniciar.bat".
+2. Primera vez: Windows puede pedir permiso a Python; acepta.
+3. Si no tienes Python: instala desde python.org (marca "tcl/tk";
+   en Python 3.13+ tkinter es opcional pero viene en el instalador completo).
+
+DISTRIBUCION (zip del sistema SIN datos de pacientes)
+- El repositorio ya excluye EXPEDIENTES/, _PLANTILLAS/, _RESPALDOS/,
+  EXPORTACIONES/, DOCUMENTOS_SIN_PACIENTE/, _BITACORA.log, _CONFIG.json,
+  _ERRORES.log y LEEME.txt (.gitignore). Un zip hecho con
+      git archive --format=zip -o Maternidad.zip HEAD
+  NUNCA lleva pacientes ni configuracion local.
+- En el equipo destino: descomprime, copia tus carpetas de datos al lado
+  (si es una actualizacion, conserva EXPEDIENTES/ y _CONFIG.json) y ejecuta
+  Iniciar.bat.
+
+ACTUALIZACION
+1. Cierra el sistema.
+2. Reemplaza app.py (y pruebas/ si quieres verificar).
+3. Conserva carpetas de datos y _CONFIG.json (el formato es retrocompatible;
+   los campos nuevos se leen con .get()).
+4. Verifica: python3 -m py_compile app.py + pruebas/ en verde.
+
+EMPAQUETADO SIN PYTHON INSTALADO (opcional)
+- Python embeddable ("python-3.x-embed-amd64.zip") + tcl/tk del instalador
+  completo, dentro de la misma carpeta; o herramientas como PyInstaller en
+  modo --windowed. Esto es material de soporte: no forma parte del core
+  stdlib (ADR-0002) y solo se arma si el dueño lo pide.
+
+SIN RED
+- El sistema es 100% local; ninguna pantalla ni módulo usa internet.
