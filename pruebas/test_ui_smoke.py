@@ -121,6 +121,10 @@ check("Pildora: pagina activa en blanco con barra dorada",
       and A.nav_barras["Pacientes"].cget("bg") == "#F2C94C"
       and A.nav["Documentos"].cget("bg") == "#071A33",
       f"{A.nav['Pacientes'].cget('bg')} / {A.nav_barras['Pacientes'].cget('bg')}")
+# ADR-0052: nav en widget plano (Label) -> colores literales en todos los SO
+check("ADR-0052: nav del sidebar en widget plano (no tk.Button)",
+      all(isinstance(b, _tk.Label) for b in A.nav.values())
+      and len(A.nav) == 8)
 check("Sidebar: tarjeta de contexto + pie con autor",
       hasattr(A, "nav_ctx_nombre") and hasattr(A, "lbl_nav_autor")
       and "SMOKE" in A.nav_ctx_nombre.cget("text"),

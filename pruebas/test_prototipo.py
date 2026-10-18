@@ -602,6 +602,42 @@ finally:
 check("B101: ES_MOVIL False en escritorio (bandera lista para movil)",
       app.ES_MOVIL is False)
 
+# --- ADR-0052/B102: legibilidad (indice de contraste WCAG de pares reales) ---
+check("B102: indice_contraste blanco/negro = 21 y mismo color = 1",
+      abs(app.indice_contraste("#FFFFFF", "#000000") - 21.0) < 0.1
+      and abs(app.indice_contraste("#123456", "#123456") - 1.0) < 1e-6,
+      f"{app.indice_contraste('#FFFFFF', '#000000'):.2f}")
+_pares_45 = [
+    # sidebar (pares reales que el dueño vio ilegibles en macOS)
+    ("#CFE0F5", "#071A33", "NAV_TEXTO/NAV_BG"),
+    ("#7FA9DA", "#071A33", "NAV_LEYENDA/NAV_BG"),
+    ("#6E93C2", "#071A33", "NAV_PIE/NAV_BG"),
+    ("#CFE0F5", "#1C4477", "NAV_TEXTO/NAV_HOVER"),
+    ("#CFE0F5", "#0E2A4D", "NAV_TEXTO/NAV_TARJETA"),
+    ("#7FA9DA", "#0E2A4D", "NAV_LEYENDA/NAV_TARJETA"),
+    ("#F2C94C", "#0E2A4D", "ACENTO/NAV_TARJETA"),
+    ("#E8B4B4", "#071A33", "ROJO_SALIR/NAV_BG"),
+    ("#071A33", "#FFFFFF", "pildora activa: NAV_BG/BLANCO"),
+    ("#071A33", "#F2C94C", "NAV_BG/ACENTO (encabezado)"),
+    # contenido
+    ("#F5F0E1", "#0A2F5A", "TEXTO_CLARO/AZUL"),
+    ("#0A2F5A", "#FFFFFF", "AZUL/BLANCO"),
+    ("#0A2F5A", "#F5F0E1", "AZUL/CREMA"),
+    ("#555555", "#F5F0E1", "GRIS_TEXTO/CREMA"),
+    ("#555555", "#FAF7F0", "GRIS_TEXTO/CREMA_CLARO"),
+    ("#6B6B6B", "#F5F0E1", "GRIS_TERCIARIO/CREMA"),
+    ("#6B6B6B", "#FFFFFF", "GRIS_TERCIARIO/BLANCO"),
+    ("#707070", "#FAF7F0", "GRIS_APAGADO/CREMA_CLARO"),
+    ("#707070", "#FFFFFF", "GRIS_APAGADO/BLANCO"),
+    ("#1B7A3D", "#FFFFFF", "VERDE_OK/BLANCO"),
+    ("#B00020", "#F5F0E1", "ROJO_AVISO/CREMA"),
+    ("#1E1E1E", "#F5F0E1", "TEXTO_OSCURO/CREMA"),
+]
+_fallan = [(n, round(app.indice_contraste(f, b), 2))
+           for f, b, n in _pares_45 if app.indice_contraste(f, b) < 4.5]
+check("B102: los 22 pares fg/bg reales cumplen WCAG AA (>=4.5)", not _fallan,
+      str(_fallan))
+
 # --- DO-10: consentimiento, aviso, NOM-004, bitacora ---
 okC1, msgC1, salC1 = app.generar_consentimiento(ruta, "Cesarea programada")
 check("DO-10 consentimiento generado", okC1, msgC1)

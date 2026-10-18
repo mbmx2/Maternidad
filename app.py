@@ -101,17 +101,18 @@ BTN_PADY = 6
 GRIS_BORDE = "#CCCCCC"
 GRIS_REJILLA = "#EEEEEE"
 GRIS_TEXTO = "#555555"
-GRIS_TERCIARIO = "#777777"
-GRIS_APAGADO = "#888888"
+GRIS_TERCIARIO = "#6B6B6B"    # ADR-0052: >=4.5 sobre crema y blanco
+GRIS_APAGADO = "#707070"      # ADR-0052: >=4.5 sobre blanco y crema_claro
 GRIS_SECUNDARIO = "#666666"
 AZUL_CHIP = "#DCE9F8"
 
 # Navegacion y encabezados (ADR-0026): identidad por pantalla
 NAV_BG = "#071A33"            # fondo profundo del sidebar
 NAV_TARJETA = "#0E2A4D"       # tarjeta de contexto y hover
+NAV_HOVER = "#1C4477"         # hover de nav (ADR-0052: delta claro vs NAV_BG)
 NAV_TEXTO = "#CFE0F5"         # texto de items inactivos
 NAV_LEYENDA = "#7FA9DA"       # secciones (PACIENTES/ATENCION/...)
-NAV_PIE = "#5F83AD"           # pie del sidebar
+NAV_PIE = "#6E93C2"           # pie del sidebar (ADR-0052: contraste >=4.5)
 ACENTO = "#F2C94C"            # barra de la pagina activa (dorado)
 ROJO_SALIR = "#E8B4B4"        # Salir en el sidebar
 
@@ -159,6 +160,28 @@ def comando_abrir(ruta):
     if ES_MACOS:
         return "open", [ruta]
     return "xdg-open", [ruta]
+
+
+# --- ADR-0052: legibilidad verificable (WCAG 2.1, puro y testeable B102) ---
+# La diferencia de legibilidad entre SO NO viene del hex (el #RRGGBB se pinta
+# identico en todos), sino de: (a) widgets dibujados por el SO (bezel Aqua),
+# (b) fuente mas fina (Helvetica) y (c) pares fg/bg debiles. Este indice
+# garantiza (c) matematicamente; (a) lo resuelve el sidebar con widgets
+# planos y el tema clam para ttk; (b) lo compensa subir tamanos pequenos.
+def luminancia_relativa(color):
+    """WCAG 2.1: luminancia relativa de un hex #RRGGBB."""
+    c = str(color).lstrip("#")
+    canales = [int(c[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    canales = [x / 12.92 if x <= 0.03928
+               else ((x + 0.055) / 1.055) ** 2.4 for x in canales]
+    return 0.2126 * canales[0] + 0.7152 * canales[1] + 0.0722 * canales[2]
+
+
+def indice_contraste(fg, bg):
+    """Ratio de contraste WCAG (1.0..2.1). Texto pequeno exige >=4.5."""
+    a, b = luminancia_relativa(fg), luminancia_relativa(bg)
+    claro, oscuro = max(a, b), min(a, b)
+    return (claro + 0.05) / (oscuro + 0.05)
 
 MESES_CORTOS = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN",
                 "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"]
@@ -7521,6 +7544,10 @@ if TK_DISPONIBLE:
                 self._scaling_base = 1.0
             try:
                 estilo = ttk.Style(self)
+                # ADR-0052: tema clam -> los widgets ttk (Treeview, Combobox,
+                # Scrollbar, Progressbar) usan NUESTROS colores en todos los
+                # SO, no la paleta del sistema (aqua/win native divergia)
+                estilo.theme_use("clam")
                 estilo.configure("Treeview", rowheight=26,
                                  font=(FUENTE_SISTEMA, FUENTE_S))
                 estilo.configure("Treeview.Heading",
@@ -7530,9 +7557,16 @@ if TK_DISPONIBLE:
                            foreground=[("selected", TEXTO_CLARO)])
                 estilo.configure("Treeview", fieldbackground=BLANCO)
                 estilo.map("TCombobox",
-                           fieldbackground=[("readonly", BLANCO)])
-                estilo.configure("TCombobox", padding=ESP_XS)
-                estilo.configure("TProgressbar", troughcolor=GRIS_REJILLA)
+                           fieldbackground=[("readonly", BLANCO)],
+                           foreground=[("readonly", TEXTO_OSCURO)])
+                estilo.configure("TCombobox", padding=ESP_XS,
+                                 fieldbackground=BLANCO, background=BLANCO,
+                                 arrowcolor=AZUL)
+                estilo.configure("TProgressbar", troughcolor=GRIS_REJILLA,
+                                 background=AZUL)
+                estilo.configure("TScrollbar", background="#CBD3DE",
+                                 troughcolor=CREMA_CLARO, bordercolor=GRIS_BORDE,
+                                 arrowcolor=GRIS_TEXTO)
             except Exception:
                 pass
             self.option_add("*Listbox.selectBackground", AZUL)
@@ -7550,7 +7584,7 @@ if TK_DISPONIBLE:
             tk.Label(sidebar, text="MATERNIDAD", font=(FUENTE_SISTEMA, 17, "bold"),
                      bg=NAV_BG, fg=BLANCO).pack(pady=(16, 0))
             tk.Frame(sidebar, bg=ACENTO, height=3).pack(fill="x", padx=18, pady=(4, 2))
-            tk.Label(sidebar, text=f"Expedientes · v{VERSION}", font=(FUENTE_SISTEMA, 8),
+            tk.Label(sidebar, text=f"Expedientes · v{VERSION}", font=(FUENTE_SISTEMA, 9),
                      bg=NAV_BG, fg=NAV_PIE).pack(anchor="w", padx=18, pady=(0, 8))
             # Tarjeta de contexto: el medico siempre ve con quién trabaja
             tarjeta = tk.Frame(sidebar, bg=NAV_TARJETA, highlightthickness=1,
@@ -7612,20 +7646,26 @@ if TK_DISPONIBLE:
                     cont.pack(fill="x", padx=8, pady=2)
                     barra = tk.Frame(cont, bg=NAV_BG, width=4)
                     barra.pack(side="left", fill="y")
-                    b = tk.Button(cont, text=f"  {glifo}  {texto}", command=accion,
-                                  relief="flat", bg=NAV_BG, fg=NAV_TEXTO,
-                                  activebackground=NAV_TARJETA, activeforeground=BLANCO,
-                                  font=(FUENTE_SISTEMA, 11), anchor="w", padx=10,
-                                  pady=6, cursor="hand2")
+                    # ADR-0052: widget PLANO (Label+pintado) en vez de
+                    # tk.Button: en macOS el bezel nativo Aqua pisa bg/fg y
+                    # los colores del sidebar no se veian legibles; Label
+                    # pinta el hex literal en TODOS los SO (misma API:
+                    # config/cget de bg/fg que usan hover, _nav_repintar y
+                    # las pruebas del smoke)
+                    b = tk.Label(cont, text=f"  {glifo}  {texto}",
+                                 bg=NAV_BG, fg=NAV_TEXTO,
+                                 font=(FUENTE_SISTEMA, 11), anchor="w",
+                                 padx=10, pady=6, cursor="hand2")
                     b.pack(side="left", fill="x", expand=True, padx=(6, 0))
+                    b.bind("<Button-1>", lambda e, acc=accion: acc())
                     b.bind("<Enter>", lambda e, bb=b, t=texto: bb.config(
-                        bg=BLANCO if t == self._nav_actual else NAV_TARJETA))
+                        bg=BLANCO if t == self._nav_actual else NAV_HOVER))
                     b.bind("<Leave>", lambda e, bb=b, t=texto: bb.config(
                         bg=BLANCO if t == self._nav_actual else NAV_BG))
                     self.nav[texto] = b
                     self.nav_barras[texto] = barra
                     if texto == "Salir":
-                        b.config(fg=ROJO_SALIR, activeforeground=ROJO_SALIR)
+                        b.config(fg=ROJO_SALIR)
                     tips = {
                         "Registrar paciente": "Alta de paciente (nueva pagina de inicio)",
                         "Pacientes": "Listado con tabla, filtros y busqueda (Ctrl+F)",
@@ -7641,10 +7681,10 @@ if TK_DISPONIBLE:
             tk.Frame(sidebar, bg="#16385F", height=1).pack(
                 side="bottom", fill="x", padx=14, pady=(8, 2))
             tk.Label(sidebar, text="Datos 100% locales · sin internet",
-                     bg=NAV_BG, fg=NAV_PIE, font=(FUENTE_SISTEMA, 8), anchor="w"
+                     bg=NAV_BG, fg=NAV_PIE, font=(FUENTE_SISTEMA, 9), anchor="w"
                      ).pack(side="bottom", fill="x", padx=16, pady=(0, 12))
             self.lbl_nav_autor = tk.Label(sidebar, text=f"Autor: {autor_actual()}",
-                                          bg=NAV_BG, fg=NAV_PIE, font=(FUENTE_SISTEMA, 8),
+                                          bg=NAV_BG, fg=NAV_PIE, font=(FUENTE_SISTEMA, 9),
                                           anchor="w")
             self.lbl_nav_autor.pack(side="bottom", fill="x", padx=16)
 
