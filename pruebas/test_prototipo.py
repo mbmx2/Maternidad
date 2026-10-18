@@ -571,6 +571,37 @@ _h_emb_crit = app.hallazgos_perfil_entradas({"temp": 38.2}, "embarazada")
 check("B100: temp 38.2 critica en ambos perfiles",
       any(h["nivel"] == "critico" for h in _h_emb_crit), str(_h_emb_crit))
 
+# --- ADR-0051/B101: adaptador de plataforma ---
+check("B101: PLATAFORMA no vacia y flags coherentes",
+      isinstance(app.PLATAFORMA, str) and app.PLATAFORMA
+      and ((app.ES_WINDOWS, app.ES_MACOS, app.ES_LINUX).count(True) == 1
+           if app.PLATAFORMA in ("windows", "macos", "linux") else True),
+      f"{app.PLATAFORMA} win={app.ES_WINDOWS} mac={app.ES_MACOS} lin={app.ES_LINUX}")
+check("B101: FUENTE_SISTEMA definida por SO",
+      isinstance(app.FUENTE_SISTEMA, str) and app.FUENTE_SISTEMA
+      and (app.FUENTE_SISTEMA == ("Segoe UI" if app.ES_WINDOWS
+                                  else "Helvetica" if app.ES_MACOS
+                                  else "DejaVu Sans")),
+      app.FUENTE_SISTEMA)
+# comando_abrir es pura: se prueba cambiando los flags y restaurando
+_b101_prev = (app.ES_WINDOWS, app.ES_MACOS, app.ES_LINUX)
+try:
+    app.ES_WINDOWS, app.ES_MACOS, app.ES_LINUX = True, False, False
+    _c = app.comando_abrir("c:/x.txt")
+    check("B101: comando_abrir windows -> startfile", _c[0] == "startfile"
+          and _c[1] == ["c:/x.txt"], str(_c))
+    app.ES_WINDOWS, app.ES_MACOS, app.ES_LINUX = False, True, False
+    _c = app.comando_abrir("/x.txt")
+    check("B101: comando_abrir macOS -> open", _c == ("open", ["/x.txt"]), str(_c))
+    app.ES_WINDOWS, app.ES_MACOS, app.ES_LINUX = False, False, True
+    _c = app.comando_abrir("/x.txt")
+    check("B101: comando_abrir linux -> xdg-open", _c == ("xdg-open", ["/x.txt"]),
+          str(_c))
+finally:
+    app.ES_WINDOWS, app.ES_MACOS, app.ES_LINUX = _b101_prev
+check("B101: ES_MOVIL False en escritorio (bandera lista para movil)",
+      app.ES_MOVIL is False)
+
 # --- DO-10: consentimiento, aviso, NOM-004, bitacora ---
 okC1, msgC1, salC1 = app.generar_consentimiento(ruta, "Cesarea programada")
 check("DO-10 consentimiento generado", okC1, msgC1)

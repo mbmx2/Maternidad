@@ -115,6 +115,51 @@ NAV_PIE = "#5F83AD"           # pie del sidebar
 ACENTO = "#F2C94C"            # barra de la pagina activa (dorado)
 ROJO_SALIR = "#E8B4B4"        # Salir en el sidebar
 
+# ===== 00c ADAPTADOR DE PLATAFORMA (ADR-0051) =====
+# TODA decision que depende del sistema operativo vive en esta seccion: el
+# resto del monolito solo usa estas constantes y la funcion comando_abrir.
+# Para soportar un SO nuevo basta agregar una rama aqui (y, si no hay Tk,
+# sustituir la capa de interfaz — el nucleo secciones 01-09 no toca SO).
+def _detectar_plataforma():
+    p = sys.platform
+    if p == "win32":
+        return "windows"
+    if p == "darwin":
+        return "macos"
+    if p.startswith("linux"):
+        return "linux"
+    return p or "desconocido"
+
+PLATAFORMA = _detectar_plataforma()
+ES_WINDOWS = PLATAFORMA == "windows"
+ES_MACOS = PLATAFORMA == "macos"
+ES_LINUX = PLATAFORMA == "linux"
+# Movil (Android/iOS): Tk no existe alla. El dia que se pida, la capa Tk se
+# sustituye (web local o Kivy/BeeWare) y el adaptador gana esas ramas; el
+# nucleo (modelos, validacion, core clinico) no cambia (ADR-0051).
+ES_MOVIL = False
+
+# Familia tipografica por SO: Tk sustituye si falta, pero aqui se decide una
+# sola vez (antes eran 271 literales "Segoe UI" repartidos por el archivo).
+FUENTE_SISTEMA = ("Segoe UI" if ES_WINDOWS
+                  else "Helvetica" if ES_MACOS
+                  else "DejaVu Sans")
+
+
+def comando_abrir(ruta):
+    """(programa, args) para abrir un archivo o carpeta con la app del sistema.
+
+    Pura y testeable (B101): es UNICO punto de decision para abrir cosas.
+    En Windows el programa es el sentinel "startfile" (os.startfile solo
+    existe alli); en macOS "open"; en el resto "xdg-open" con fallbacks.
+    """
+    ruta = str(ruta)
+    if ES_WINDOWS:
+        return "startfile", [ruta]
+    if ES_MACOS:
+        return "open", [ruta]
+    return "xdg-open", [ruta]
+
 MESES_CORTOS = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN",
                 "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"]
 MESES_TXT = {
@@ -2163,13 +2208,28 @@ def escapar_xml(t):
 
 
 def abrir_archivo(ruta):
-    ruta = str(ruta)
-    if sys.platform == "win32":
-        os.startfile(ruta)
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", ruta])
-    else:
-        subprocess.Popen(["xdg-open", ruta])
+    """Abre archivo/carpeta con la app del sistema (ADR-0051: decision unica
+    en comando_abrir; en Linux cae por fallbacks si falta xdg-open)."""
+    prog, args = comando_abrir(ruta)
+    if prog == "startfile":
+        os.startfile(str(ruta))  # solo Windows; el adaptador lo decide
+        return
+    intentos = [(prog, args)]
+    if not ES_MACOS:
+        # Linux y demas: orden de preferencia si xdg-open no esta instalado
+        intentos += [["gio", ["open", str(ruta)]], ["kde-open", [str(ruta)]]]
+    ultimo = None
+    for cmd in intentos:
+        try:
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+            return
+        except Exception as e:      # FileNotFoundError u otros
+            ultimo = e
+            continue
+    raise RuntimeError(
+        f"No se pudo abrir {ruta}: falta un gestor de archivos "
+        f"(instala xdg-open/gio en Linux). Detalle: {ultimo}")
 
 
 def abrir_carpeta(ruta):
@@ -5270,7 +5330,7 @@ if TK_DISPONIBLE:
             self.anio_cb = ttk.Combobox(f_anio, textvariable=self.anio_var, width=7,
                                         values=[str(a) for a in
                                                 range(self.anio_min, self.anio_max + 1)],
-                                        font=("Segoe UI", 13, "bold"))
+                                        font=(FUENTE_SISTEMA, 13, "bold"))
             self.anio_cb.pack(side="left", padx=4)
             self.anio_cb.bind("<Return>", self._enter_anio)
             self.anio_cb.bind("<<ComboboxSelected>>", self._sel_anio)
@@ -5285,7 +5345,7 @@ if TK_DISPONIBLE:
                       ).pack(side="left", padx=3)
             self.mes_var = tk.StringVar(value=MESES_LARGOS[self.mes - 1])
             self.mes_cb = ttk.Combobox(f_mes, textvariable=self.mes_var, width=14,
-                                       values=MESES_LARGOS, font=("Segoe UI", 13, "bold"))
+                                       values=MESES_LARGOS, font=(FUENTE_SISTEMA, 13, "bold"))
             self.mes_cb.pack(side="left", padx=4)
             self.mes_cb.bind("<Return>", self._enter_mes)
             self.mes_cb.bind("<<ComboboxSelected>>", self._sel_mes)
@@ -5296,20 +5356,20 @@ if TK_DISPONIBLE:
             f_dia = tk.Frame(self, bg=CREMA)
             f_dia.pack(pady=(6, 4))
             tk.Label(f_dia, text="Dia:", bg=CREMA, fg=TEXTO_OSCURO,
-                     font=("Segoe UI", 11)).pack(side="left")
+                     font=(FUENTE_SISTEMA, 11)).pack(side="left")
             self.dia_var = tk.StringVar(value=str(self.dia))
             self.dia_spin = tk.Spinbox(f_dia, from_=1, to=31, width=4, textvariable=self.dia_var,
-                                       font=("Segoe UI", 13, "bold"), command=self._spin_dia)
+                                       font=(FUENTE_SISTEMA, 13, "bold"), command=self._spin_dia)
             self.dia_spin.pack(side="left", padx=6)
             self.dia_spin.bind("<Return>", self._enter_dia)
             tk.Label(f_dia, text="(Enter selecciona y cierra)", bg=CREMA, fg=GRIS_TERCIARIO,
-                     font=("Segoe UI", 8)).pack(side="left")
+                     font=(FUENTE_SISTEMA, 8)).pack(side="left")
 
             f_semana = tk.Frame(self, bg=AZUL)
             f_semana.pack(fill="x", padx=8, pady=(4, 0))
             for sigla in ("L", "M", "M", "J", "V", "S", "D"):
                 tk.Label(f_semana, text=sigla, width=5, bg=AZUL, fg=TEXTO_CLARO,
-                         font=("Segoe UI", 10, "bold")).pack(side="left")
+                         font=(FUENTE_SISTEMA, 10, "bold")).pack(side="left")
 
             self.frame_dias = tk.Frame(self, bg=CREMA)
             self.frame_dias.pack(fill="both", expand=True, padx=8, pady=4)
@@ -5322,7 +5382,7 @@ if TK_DISPONIBLE:
             self.btn_sel = tk.Button(f_pie, text="Seleccionar fecha",
                                      command=self._elegir_seleccion, width=16,
                                      bg=AZUL, fg=TEXTO_CLARO,
-                                     activebackground=AZUL_HOVER, font=("Segoe UI", 10, "bold"))
+                                     activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 10, "bold"))
             self.btn_sel.pack(side="left", padx=4)
             tk.Button(f_pie, text="Cancelar", command=self.destroy, width=10,
                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO, activebackground=GRIS_APAGADO
@@ -5461,7 +5521,7 @@ if TK_DISPONIBLE:
                                   bg=AZUL if elegido else BLANCO,
                                   fg=TEXTO_CLARO if elegido else TEXTO_OSCURO,
                                   activebackground=AZUL_HOVER, relief="flat",
-                                  font=("Segoe UI", 10),
+                                  font=(FUENTE_SISTEMA, 10),
                                   command=lambda dd=d: self._elegir(
                                       datetime.date(self.anio, self.mes, dd)))
                 if not permitido:
@@ -5495,13 +5555,13 @@ if TK_DISPONIBLE:
 
         return tk.Button(master, text="[Cal]", command=_abrir, bg=AZUL,
                          fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                         font=("Segoe UI", 9))
+                         font=(FUENTE_SISTEMA, 9))
 
     def _label_calculo(parent, var_fum, texto_vacio="(FUM opcional: muestra FPP y edad gestacional)",
                        wrap=440):
         """Label FPP/EG en vivo compartido por los dialogos de embarazo (F1)."""
         lbl = tk.Label(parent, text="", bg=CREMA_CLARO, fg=AZUL,
-                       font=("Segoe UI", 10, "bold"), wraplength=wrap, justify="left")
+                       font=(FUENTE_SISTEMA, 10, "bold"), wraplength=wrap, justify="left")
 
         def actualizar(*_args):
             fum_v = parsear_fecha(var_fum.get())
@@ -5778,7 +5838,7 @@ if TK_DISPONIBLE:
                 y = self.w.winfo_rooty() + self.w.winfo_height() + 3
                 tw.wm_geometry(f"+{x}+{y}")
                 tk.Label(tw, text=self.txt, bg="#FFFFE1", fg=TEXTO_OSCURO,
-                         relief="solid", bd=1, font=("Segoe UI", 9),
+                         relief="solid", bd=1, font=(FUENTE_SISTEMA, 9),
                          padx=6, pady=3).pack()
                 self.top = tw
             except Exception:
@@ -5811,12 +5871,12 @@ if TK_DISPONIBLE:
             self.resizable(False, False)
             marco = tk.Frame(self, bg=CREMA_CLARO, padx=16, pady=16)
             marco.pack(fill="both", expand=True, padx=12, pady=12)
-            tk.Label(marco, text="Seleccionar plantilla", font=("Segoe UI", 14, "bold"),
+            tk.Label(marco, text="Seleccionar plantilla", font=(FUENTE_SISTEMA, 14, "bold"),
                      bg=CREMA_CLARO, fg=TEXTO_OSCURO).pack(anchor="w")
             self.tpls = listar_plantillas()
             self.tpl_var = tk.StringVar(value=self.tpls[0] if self.tpls else "")
             cb = ttk.Combobox(marco, textvariable=self.tpl_var, values=self.tpls,
-                              state="readonly", font=("Segoe UI", 11))
+                              state="readonly", font=(FUENTE_SISTEMA, 11))
             cb.pack(fill="x", pady=8)
             tk.Label(marco, text=f"Paciente: {nombre_mostrar(ruta)}",
                      bg=CREMA_CLARO, fg=TEXTO_OSCURO, wraplength=440,
@@ -5859,7 +5919,7 @@ if TK_DISPONIBLE:
             marco.pack(fill="both", expand=True, padx=10, pady=10)
 
             tk.Label(marco, text=datos.get("nombre_completo", ""),
-                     font=("Segoe UI", 15, "bold"), bg=CREMA_CLARO,
+                     font=(FUENTE_SISTEMA, 15, "bold"), bg=CREMA_CLARO,
                      fg=TEXTO_OSCURO).pack(anchor="w")
             tk.Label(marco,
                      text=f"Nacimiento: {fecha_legible(datos.get('fecha_nacimiento', ''))}"
@@ -5867,9 +5927,9 @@ if TK_DISPONIBLE:
                      bg=CREMA_CLARO, fg=GRIS_TEXTO).pack(anchor="w")
             tk.Label(marco, text="* nombre y fecha de nacimiento no se editan aqui",
                      bg=CREMA_CLARO, fg=GRIS_APAGADO,
-                     font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 6))
+                     font=(FUENTE_SISTEMA, 9)).pack(anchor="w", pady=(0, 6))
 
-            tk.Label(marco, text="· DATOS DE LA PACIENTE ·", font=("Segoe UI", 9, "bold"),
+            tk.Label(marco, text="· DATOS DE LA PACIENTE ·", font=(FUENTE_SISTEMA, 9, "bold"),
                      bg=CREMA_CLARO, fg=AZUL).pack(anchor="w", pady=(4, 2))
             campos = tk.Frame(marco, bg=CREMA_CLARO)
             campos.pack(fill="x")
@@ -5883,16 +5943,16 @@ if TK_DISPONIBLE:
                                                ("Alergias (Tier A)", "alergias"),
                                                ("Grupo sanguineo (Tier A)", "grupo_sanguineo")]):
                 tk.Label(campos, text=etiq, bg=CREMA_CLARO, fg=TEXTO_OSCURO,
-                         font=("Segoe UI", 10)).grid(row=i, column=0, sticky="w",
+                         font=(FUENTE_SISTEMA, 10)).grid(row=i, column=0, sticky="w",
                                                      pady=2, padx=(0, 8))
                 var = tk.StringVar(value=datos.get(clave, "") or "")
-                e = tk.Entry(campos, textvariable=var, font=("Segoe UI", 11),
+                e = tk.Entry(campos, textvariable=var, font=(FUENTE_SISTEMA, 11),
                              bg=BLANCO, state="disabled", relief="solid", bd=1)
                 e.grid(row=i, column=1, sticky="we", pady=2)
                 self.vars[clave] = var
 
             tk.Label(marco, text="· EPISODIOS DE EMBARAZO Y CONTROLES ·",
-                     font=("Segoe UI", 9, "bold"), bg=CREMA_CLARO,
+                     font=(FUENTE_SISTEMA, 9, "bold"), bg=CREMA_CLARO,
                      fg=AZUL).pack(anchor="w", pady=(10, 2))
             marco_tabla = tk.Frame(marco, bg=BLANCO, highlightthickness=1,
                                    highlightbackground=GRIS_BORDE)
@@ -6015,7 +6075,7 @@ if TK_DISPONIBLE:
             self.configure(bg=CREMA)
             marco = tk.Frame(self, bg=CREMA_CLARO, padx=14, pady=12)
             marco.pack(fill="both", expand=True, padx=10, pady=10)
-            self.lbl_ctx = tk.Label(marco, text="", font=("Segoe UI", 11, "bold"),
+            self.lbl_ctx = tk.Label(marco, text="", font=(FUENTE_SISTEMA, 11, "bold"),
                                     bg=CREMA_CLARO, fg=TEXTO_OSCURO, anchor="w")
             self.lbl_ctx.pack(fill="x")
             tabla_frame = tk.Frame(marco, bg=BLANCO, highlightthickness=1,
@@ -6052,10 +6112,10 @@ if TK_DISPONIBLE:
                      ("Notas", "notas")]
             for i, (lab, key) in enumerate(filas):
                 tk.Label(campos_frame, text=lab, bg=CREMA_CLARO, fg=TEXTO_OSCURO,
-                         font=("Segoe UI", 10), anchor="w"
+                         font=(FUENTE_SISTEMA, 10), anchor="w"
                          ).grid(row=i, column=0, sticky="w", pady=2, padx=(0, 8))
                 var = tk.StringVar()
-                e = tk.Entry(campos_frame, textvariable=var, font=("Segoe UI", 11),
+                e = tk.Entry(campos_frame, textvariable=var, font=(FUENTE_SISTEMA, 11),
                              bg=BLANCO, relief="solid", bd=1)
                 e.grid(row=i, column=1, sticky="we", pady=2)
                 self.vars[key] = var
@@ -6066,7 +6126,7 @@ if TK_DISPONIBLE:
 
             # C-20: lista de alertas del episodio (circuito cerrado)
             tk.Label(marco, text="ALERTAS DEL EPISODIO", bg=CREMA_CLARO, fg=AZUL,
-                     font=("Segoe UI", 9, "bold"), anchor="w"
+                     font=(FUENTE_SISTEMA, 9, "bold"), anchor="w"
                      ).pack(fill="x", pady=(8, 2))
             marco_alertas = tk.Frame(marco, bg=BLANCO, highlightthickness=1,
                                      highlightbackground=GRIS_BORDE)
@@ -6092,7 +6152,7 @@ if TK_DISPONIBLE:
                     ("Dictar (voz)", self._dictar, GRIS_SECUNDARIO),
                     ("Cerrar", self.destroy, GRIS_SECUNDARIO)]:
                 tk.Button(pie, text=txt, command=cmd, bg=color, fg=TEXTO_CLARO,
-                          activebackground=AZUL_HOVER, font=("Segoe UI", 10),
+                          activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 10),
                           padx=8, pady=BTN_PADY).pack(side="left", padx=3)
             self._refrescar()
             self._refrescar_alertas()
@@ -6112,20 +6172,20 @@ if TK_DISPONIBLE:
             marco = tk.Frame(win, bg=CREMA_CLARO, padx=14, pady=12)
             marco.pack(fill="both", expand=True)
             tk.Label(marco, text="Dictado para notas del control",
-                     font=("Segoe UI", 12, "bold"), bg=CREMA_CLARO, fg=AZUL
+                     font=(FUENTE_SISTEMA, 12, "bold"), bg=CREMA_CLARO, fg=AZUL
                      ).pack(anchor="w")
             if ok:
                 tk.Label(marco, text="Motor Vosk disponible. Usa el dictado del SO "
                                      "(Win+H / fn fn) en el campo de notas.",
                          bg=CREMA_CLARO, fg=VERDE_OK, wraplength=400,
-                         justify="left", font=("Segoe UI", 10)).pack(anchor="w", pady=6)
+                         justify="left", font=(FUENTE_SISTEMA, 10)).pack(anchor="w", pady=6)
             else:
                 tk.Label(marco, text=f"Dictado disponible:\n{msg}\n\n"
                                      "En Windows: presiona Win+H y dicta.\n"
                                      "En macOS: presiona fn dos veces y dicta.\n"
                                      "En Linux: Super+Ctrl+Espacio.",
                          bg=CREMA_CLARO, fg=TEXTO_OSCURO, wraplength=400,
-                         justify="left", font=("Segoe UI", 10)).pack(anchor="w", pady=6)
+                         justify="left", font=(FUENTE_SISTEMA, 10)).pack(anchor="w", pady=6)
             tk.Button(marco, text="Cerrar", command=win.destroy, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO, padx=10, pady=6
                       ).pack(anchor="e", pady=8)
@@ -6181,16 +6241,16 @@ if TK_DISPONIBLE:
             vw.configure(bg=CREMA)
             cuerpo = tk.Frame(vw, bg=CREMA_CLARO, padx=12, pady=10)
             cuerpo.pack(fill="both", expand=True)
-            tk.Label(cuerpo, text=msg, font=("Segoe UI", 11, "bold"),
+            tk.Label(cuerpo, text=msg, font=(FUENTE_SISTEMA, 11, "bold"),
                      bg=CREMA_CLARO, fg=ROJO_AVISO if hall else VERDE_OK,
                      anchor="w", wraplength=560, justify="left").pack(fill="x")
             for h in hall:
                 tk.Label(cuerpo, text="• " + h.get("mensaje", ""), bg=CREMA_CLARO,
-                         fg=TEXTO_OSCURO, font=("Segoe UI", 9), anchor="w",
+                         fg=TEXTO_OSCURO, font=(FUENTE_SISTEMA, 9), anchor="w",
                          wraplength=560, justify="left").pack(fill="x", pady=2)
             if not ok and not hall:
                 tk.Label(cuerpo, text="(solo lectura: el archivo del medico no se toca)",
-                         bg=CREMA_CLARO, fg=GRIS_TEXTO, font=("Segoe UI", 8)
+                         bg=CREMA_CLARO, fg=GRIS_TEXTO, font=(FUENTE_SISTEMA, 8)
                          ).pack(anchor="w", pady=(4, 0))
             pie2 = tk.Frame(cuerpo, bg=CREMA_CLARO)
             pie2.pack(fill="x", pady=(8, 0))
@@ -6213,7 +6273,7 @@ if TK_DISPONIBLE:
                     vw.destroy()
                 tk.Button(pie2, text=f"Registrar {len(criticos)} alerta(s)",
                           command=_altas, bg=ROJO_AVISO, fg=TEXTO_CLARO,
-                          activebackground="#C43A4B", font=("Segoe UI", 10, "bold"),
+                          activebackground="#C43A4B", font=(FUENTE_SISTEMA, 10, "bold"),
                           padx=10, pady=6).pack(side="right", padx=6)
             auto_tamano(vw, self)
 
@@ -6378,21 +6438,21 @@ if TK_DISPONIBLE:
             except Exception:
                 nom = "?"
             tk.Label(cab, text=f"Historia clinica A-M · {nom}",
-                     font=("Segoe UI", 13, "bold"), bg=CREMA_CLARO,
+                     font=(FUENTE_SISTEMA, 13, "bold"), bg=CREMA_CLARO,
                      fg=TEXTO_OSCURO).pack(side="left")
             self.barra = ttk.Progressbar(cab, length=180, mode="determinate")
             self.barra.pack(side="right", padx=(8, 0))
             self.lbl_prog = tk.Label(cab, text="0%", bg=CREMA_CLARO, fg=AZUL,
-                                     font=("Segoe UI", 10, "bold"))
+                                     font=(FUENTE_SISTEMA, 10, "bold"))
             self.lbl_prog.pack(side="right")
 
             # --- notas: selector + altas (sin borrado, C-16 precedent) ---
             fila_notas = tk.Frame(marco, bg=CREMA_CLARO)
             fila_notas.pack(fill="x", pady=(6, 2))
             tk.Label(fila_notas, text="Nota:", bg=CREMA_CLARO, fg=TEXTO_OSCURO,
-                     font=("Segoe UI", 10)).pack(side="left")
+                     font=(FUENTE_SISTEMA, 10)).pack(side="left")
             self.combo_notas = ttk.Combobox(fila_notas, state="readonly",
-                                             width=34, font=("Segoe UI", 10))
+                                             width=34, font=(FUENTE_SISTEMA, 10))
             self.combo_notas.pack(side="left", padx=6)
             self.combo_notas.bind("<<ComboboxSelected>>", self._cambiar_nota)
             for txt, tipo in [("+ Nota ingreso", "ingreso"),
@@ -6400,29 +6460,29 @@ if TK_DISPONIBLE:
                               ("+ Egreso", "egreso")]:
                 tk.Button(fila_notas, text=txt, command=lambda tp=tipo:
                           self._crear_nota(tp), bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO,
-                          activebackground=GRIS_APAGADO, font=("Segoe UI", 9),
+                          activebackground=GRIS_APAGADO, font=(FUENTE_SISTEMA, 9),
                           padx=6, pady=2).pack(side="left", padx=3)
             tk.Button(fila_notas, text="Exportar checklist (.xlsx)",
                       command=self._exportar_checklist, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
-                      font=("Segoe UI", 9), padx=8, pady=3
+                      font=(FUENTE_SISTEMA, 9), padx=8, pady=3
                       ).pack(side="right", padx=3)
             tk.Button(fila_notas, text="Vista previa A-M",
                       command=self._vista_previa_v2, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
-                      font=("Segoe UI", 9), padx=8, pady=3
+                      font=(FUENTE_SISTEMA, 9), padx=8, pady=3
                       ).pack(side="right", padx=3)
             tk.Button(fila_notas, text="Generar .txt A-M",
                       command=self._generar_v2, bg=AZUL, fg=TEXTO_CLARO,
-                      activebackground=AZUL_HOVER, font=("Segoe UI", 10, "bold"),
+                      activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 10, "bold"),
                       padx=10, pady=3).pack(side="right", padx=3)
             tk.Button(fila_notas, text="Guardar seccion", command=self._guardar,
                       bg=VERDE_OK, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                      font=("Segoe UI", 10, "bold"), padx=10, pady=3
+                      font=(FUENTE_SISTEMA, 10, "bold"), padx=10, pady=3
                       ).pack(side="right", padx=3)
             tk.Button(fila_notas, text="Cerrar", command=self.destroy,
                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO,
-                      activebackground=GRIS_APAGADO, font=("Segoe UI", 10),
+                      activebackground=GRIS_APAGADO, font=(FUENTE_SISTEMA, 10),
                       padx=10, pady=3).pack(side="right", padx=3)
 
             # --- notebook A-M ---
@@ -6440,7 +6500,7 @@ if TK_DISPONIBLE:
             self.frame_cab_sec = tk.Frame(marco, bg=CREMA_CLARO)
             self.frame_cab_sec.pack(fill="x", pady=(6, 0))
             self.lbl_sec = tk.Label(self.frame_cab_sec, text="", bg=CREMA_CLARO,
-                                    fg=AZUL, font=("Segoe UI", 11, "bold"),
+                                    fg=AZUL, font=(FUENTE_SISTEMA, 11, "bold"),
                                     anchor="w", justify="left")
             self.lbl_sec.pack(fill="x")
 
@@ -6632,7 +6692,7 @@ if TK_DISPONIBLE:
             filas.grid_columnconfigure(1, weight=1)
             for i, it in enumerate(secc["items"]):
                 tk.Label(filas, text=it["lbl"], bg=CREMA_CLARO, fg=TEXTO_OSCURO,
-                         font=("Segoe UI", 9), anchor="nw", justify="left",
+                         font=(FUENTE_SISTEMA, 9), anchor="nw", justify="left",
                          wraplength=240).grid(row=i, column=0, sticky="nw",
                                               pady=2, padx=(0, 8))
                 valor = self._destino.get(it["id"], "")
@@ -6643,7 +6703,7 @@ if TK_DISPONIBLE:
             t = it["t"]
             if t == "auto":
                 txt = auto_historia(secc["id"], it["id"], ctx)
-                e = tk.Entry(parent, font=("Segoe UI", 10), bg="#ECECEC",
+                e = tk.Entry(parent, font=(FUENTE_SISTEMA, 10), bg="#ECECEC",
                              fg=GRIS_TEXTO, state="readonly")
                 e.insert(0, txt)
                 return e
@@ -6651,14 +6711,14 @@ if TK_DISPONIBLE:
                 var = tk.StringVar(value="" if valor in (None, "") else str(valor))
                 if t == "fecha":
                     caja = tk.Frame(parent, bg=CREMA_CLARO)
-                    e = tk.Entry(caja, textvariable=var, font=("Segoe UI", 10),
+                    e = tk.Entry(caja, textvariable=var, font=(FUENTE_SISTEMA, 10),
                                  bg=BLANCO)
                     e.pack(side="left", fill="x", expand=True)
                     boton_calendario(caja, var, "iso", popup_parent=self
                                      ).pack(side="left", padx=(4, 0))
                     self._widgets[it["id"]] = lambda v=var: v.get().strip()
                     return caja
-                e = tk.Entry(parent, textvariable=var, font=("Segoe UI", 10),
+                e = tk.Entry(parent, textvariable=var, font=(FUENTE_SISTEMA, 10),
                              bg=BLANCO)
                 self._widgets[it["id"]] = lambda v=var: v.get().strip()
                 return e
@@ -6666,11 +6726,11 @@ if TK_DISPONIBLE:
                 ops = list(it.get("ops") or [])
                 var = tk.StringVar(value="" if valor in (None, "") else str(valor))
                 cb = ttk.Combobox(parent, textvariable=var, values=ops,
-                                  font=("Segoe UI", 10))
+                                  font=(FUENTE_SISTEMA, 10))
                 self._widgets[it["id"]] = lambda v=var: v.get().strip()
                 return cb
             if t == "libre":
-                box = tk.Text(parent, height=3, font=("Segoe UI", 10), bg=BLANCO,
+                box = tk.Text(parent, height=3, font=(FUENTE_SISTEMA, 10), bg=BLANCO,
                               relief="solid", bd=1)
                 box.insert("1.0", "" if valor in (None, "") else str(valor))
                 self._widgets[it["id"]] = (lambda b=box:
@@ -6694,24 +6754,24 @@ if TK_DISPONIBLE:
             for val, lab in opciones:
                 tk.Radiobutton(caja, text=lab, variable=var, value=val,
                                bg=CREMA_CLARO, fg=TEXTO_OSCURO,
-                               selectcolor=BLANCO, font=("Segoe UI", 9)
+                               selectcolor=BLANCO, font=(FUENTE_SISTEMA, 9)
                                ).pack(side="left", padx=(0, 4))
             ents = {}
             if t == "snv":
-                e1 = tk.Entry(caja, font=("Segoe UI", 9), width=18, bg=BLANCO)
+                e1 = tk.Entry(caja, font=(FUENTE_SISTEMA, 9), width=18, bg=BLANCO)
                 e1.insert(0, extras.get("v", ""))
                 e1.pack(side="left", padx=4)
                 ents["v"] = e1
             elif t == "snc":
                 for k, lab, ancho in (("d1", "Edad/dx", 8), ("d2", "Tratam.", 14)):
                     tk.Label(caja, text=lab, bg=CREMA_CLARO, fg=GRIS_TEXTO,
-                             font=("Segoe UI", 8)).pack(side="left")
-                    e1 = tk.Entry(caja, font=("Segoe UI", 9), width=ancho, bg=BLANCO)
+                             font=(FUENTE_SISTEMA, 8)).pack(side="left")
+                    e1 = tk.Entry(caja, font=(FUENTE_SISTEMA, 9), width=ancho, bg=BLANCO)
                     e1.insert(0, extras.get(k, ""))
                     e1.pack(side="left", padx=(1, 4))
                     ents[k] = e1
             elif t == "snh":
-                e1 = tk.Entry(caja, font=("Segoe UI", 9), width=30, bg=BLANCO)
+                e1 = tk.Entry(caja, font=(FUENTE_SISTEMA, 9), width=30, bg=BLANCO)
                 e1.insert(0, extras.get("h", ""))
                 e1.pack(side="left", padx=4)
                 ents["h"] = e1
@@ -6750,7 +6810,7 @@ if TK_DISPONIBLE:
             caja = tk.Frame(vw, bg=CREMA_CLARO, padx=10, pady=8)
             caja.pack(fill="both", expand=True)
             tk.Label(caja, text="Historia completa A-M · vista previa",
-                     font=("Segoe UI", 11, "bold"), bg=CREMA_CLARO, fg=AZUL
+                     font=(FUENTE_SISTEMA, 11, "bold"), bg=CREMA_CLARO, fg=AZUL
                      ).pack(anchor="w")
             box = tk.Text(caja, width=92, height=26, font=("Courier", 10),
                           bg=BLANCO, relief="solid", bd=1, wrap="none")
@@ -6806,14 +6866,14 @@ if TK_DISPONIBLE:
             marco = tk.Frame(self, bg=CREMA_CLARO, padx=14, pady=12)
             marco.pack(fill="both", expand=True)
             tk.Label(marco, text=f"Perfil: {perfil} · hallazgos: {len(hallazgos)}",
-                     font=("Segoe UI", 12, "bold"), bg=CREMA_CLARO, fg=AZUL
+                     font=(FUENTE_SISTEMA, 12, "bold"), bg=CREMA_CLARO, fg=AZUL
                      ).pack(anchor="w")
             colores = {"critico": "#F8C9C4", "alerta": "#FFE9B8",
                        "esperado_embarazo": AZUL_CHIP}
             if not hallazgos:
                 tk.Label(marco, text="Todas las constantes dentro de rango.",
                          bg=CREMA_CLARO, fg=VERDE_OK,
-                         font=("Segoe UI", 10)).pack(anchor="w", pady=4)
+                         font=(FUENTE_SISTEMA, 10)).pack(anchor="w", pady=4)
             for h in hallazgos:
                 nivel = h.get("nivel", "alerta")
                 fila = tk.Frame(marco, bg=colores.get(nivel, BLANCO),
@@ -6822,27 +6882,27 @@ if TK_DISPONIBLE:
                 fila.pack(fill="x", pady=3)
                 tk.Label(fila, text=nivel.upper(), bg=colores.get(nivel, BLANCO),
                          fg=ROJO_AVISO if nivel == "critico" else TEXTO_OSCURO,
-                         font=("Segoe UI", 9, "bold"), padx=6, pady=4
+                         font=(FUENTE_SISTEMA, 9, "bold"), padx=6, pady=4
                          ).pack(side="left")
                 tk.Label(fila, text=h.get("mensaje", ""), bg=colores.get(nivel, BLANCO),
-                         fg=TEXTO_OSCURO, font=("Segoe UI", 9), wraplength=520,
+                         fg=TEXTO_OSCURO, font=(FUENTE_SISTEMA, 9), wraplength=520,
                          justify="left", padx=6, pady=4).pack(side="left", fill="x")
             # qSOFA
             if qsofa_pts is not None:
                 crit = qsofa_pts >= 2
                 tk.Label(marco, text=qmsg, bg=CREMA_CLARO,
                          fg=ROJO_AVISO if crit else TEXTO_OSCURO,
-                         font=("Segoe UI", 10, "bold"), anchor="w", wraplength=540,
+                         font=(FUENTE_SISTEMA, 10, "bold"), anchor="w", wraplength=540,
                          justify="left").pack(fill="x", pady=(6, 0))
                 if crit:
                     tk.Button(marco, text="Marcar alerta (qSOFA)",
                               command=self._marcar_qsofa, bg=ROJO_AVISO,
                               fg=TEXTO_CLARO, activebackground="#C43A4B",
-                              font=("Segoe UI", 10, "bold"), padx=10, pady=6
+                              font=(FUENTE_SISTEMA, 10, "bold"), padx=10, pady=6
                               ).pack(anchor="w", pady=4)
             else:
                 tk.Label(marco, text=qmsg, bg=CREMA_CLARO, fg=GRIS_TEXTO,
-                         font=("Segoe UI", 9), anchor="w", wraplength=540,
+                         font=(FUENTE_SISTEMA, 9), anchor="w", wraplength=540,
                          justify="left").pack(fill="x", pady=(6, 0))
             pie = tk.Frame(marco, bg=CREMA_CLARO)
             pie.pack(fill="x", pady=(10, 0))
@@ -6852,7 +6912,7 @@ if TK_DISPONIBLE:
                       ).pack(side="left")
             tk.Button(pie, text="Registrar de todos modos", command=self._aceptar,
                       bg=VERDE_OK, fg=TEXTO_CLARO, activebackground="#14602F",
-                      font=("Segoe UI", 11, "bold"), padx=12, pady=6
+                      font=(FUENTE_SISTEMA, 11, "bold"), padx=12, pady=6
                       ).pack(side="right")
             auto_tamano(self, parent)
 
@@ -6878,23 +6938,23 @@ if TK_DISPONIBLE:
             marco.pack(fill="both", expand=True)
             tk.Label(marco, text=f"{alerta.get('origen', '')} · "
                                  f"{alerta.get('fecha', '')}",
-                     font=("Segoe UI", 11, "bold"), bg=CREMA_CLARO, fg=ROJO_AVISO,
+                     font=(FUENTE_SISTEMA, 11, "bold"), bg=CREMA_CLARO, fg=ROJO_AVISO,
                      anchor="w", wraplength=520, justify="left").pack(fill="x")
             tk.Label(marco, text=alerta.get("descripcion", ""), bg=CREMA_CLARO,
-                     fg=TEXTO_OSCURO, font=("Segoe UI", 9), anchor="w",
+                     fg=TEXTO_OSCURO, font=(FUENTE_SISTEMA, 9), anchor="w",
                      wraplength=520, justify="left").pack(fill="x", pady=(4, 8))
             tk.Label(marco, text="Respuesta / evolucion:", bg=CREMA_CLARO,
-                     fg=TEXTO_OSCURO, font=("Segoe UI", 10)).pack(anchor="w")
-            self.txt = tk.Text(marco, height=4, width=64, font=("Segoe UI", 10),
+                     fg=TEXTO_OSCURO, font=(FUENTE_SISTEMA, 10)).pack(anchor="w")
+            self.txt = tk.Text(marco, height=4, width=64, font=(FUENTE_SISTEMA, 10),
                                bg=BLANCO, relief="solid", bd=1)
             self.txt.pack(fill="x", pady=3)
             fila = tk.Frame(marco, bg=CREMA_CLARO)
             fila.pack(fill="x", pady=(4, 0))
             tk.Label(fila, text=f"Medico: {autor_actual()}", bg=CREMA_CLARO,
-                     fg=TEXTO_OSCURO, font=("Segoe UI", 9)).pack(side="left")
+                     fg=TEXTO_OSCURO, font=(FUENTE_SISTEMA, 9)).pack(side="left")
             tk.Label(fila, text="Cedula:", bg=CREMA_CLARO, fg=TEXTO_OSCURO,
-                     font=("Segoe UI", 9)).pack(side="right")
-            self.e_cedula = tk.Entry(fila, font=("Segoe UI", 10), width=16, bg=BLANCO)
+                     font=(FUENTE_SISTEMA, 9)).pack(side="right")
+            self.e_cedula = tk.Entry(fila, font=(FUENTE_SISTEMA, 10), width=16, bg=BLANCO)
             self.e_cedula.pack(side="right", padx=4)
             pie = tk.Frame(marco, bg=CREMA_CLARO)
             pie.pack(fill="x", pady=(10, 0))
@@ -6903,7 +6963,7 @@ if TK_DISPONIBLE:
                       ).pack(side="left")
             tk.Button(pie, text="Registrar respuesta", command=self._guardar,
                       bg=VERDE_OK, fg=TEXTO_CLARO, activebackground="#14602F",
-                      font=("Segoe UI", 11, "bold"), padx=12, pady=6
+                      font=(FUENTE_SISTEMA, 11, "bold"), padx=12, pady=6
                       ).pack(side="right")
             auto_tamano(self, parent)
 
@@ -6929,7 +6989,7 @@ if TK_DISPONIBLE:
             marco = tk.Frame(self, bg=CREMA_CLARO, padx=12, pady=10)
             marco.pack(fill="both", expand=True)
             # ADR-0042: banner de contexto (reemplaza al messagebox de apertura)
-            self.lbl_ctx = tk.Label(marco, text="", font=("Segoe UI", 10, "bold"),
+            self.lbl_ctx = tk.Label(marco, text="", font=(FUENTE_SISTEMA, 10, "bold"),
                                     bg=CREMA_CLARO, anchor="w")
             self.lbl_ctx.pack(fill="x", pady=(0, 6))
             # ADR-0044: casillero PERFILES — embarazada/adulto, rapido y visible.
@@ -6944,10 +7004,10 @@ if TK_DISPONIBLE:
                 fila_perfil, text="PACIENTE EMBARAZADA", variable=self.var_embarazada,
                 command=self._cambiar_perfil, onvalue=True, offvalue=False,
                 bg="#EEF3FA", fg=AZUL, activebackground="#EEF3FA",
-                selectcolor=BLANCO, font=("Segoe UI", 11, "bold"),
+                selectcolor=BLANCO, font=(FUENTE_SISTEMA, 11, "bold"),
                 padx=8, pady=4).pack(side="left")
             self.lbl_perfil = tk.Label(fila_perfil, text="", bg="#EEF3FA",
-                                       fg=GRIS_TEXTO, font=("Segoe UI", 9),
+                                       fg=GRIS_TEXTO, font=(FUENTE_SISTEMA, 9),
                                        anchor="w", justify="left", wraplength=480)
             self.lbl_perfil.pack(side="left", fill="x", expand=True, padx=(4, 8),
                                  pady=4)
@@ -6956,16 +7016,16 @@ if TK_DISPONIBLE:
             fila = tk.Frame(marco, bg=CREMA_CLARO)
             fila.pack(fill="x")
             tk.Label(fila, text="Grupo:", bg=CREMA_CLARO, fg=TEXTO_OSCURO,
-                     font=("Segoe UI", 10)).pack(side="left")
+                     font=(FUENTE_SISTEMA, 10)).pack(side="left")
             # ADR-0043: ★ Prioritarias encabeza; defecto = composicion corporal
             self._grupos_ui = [GRUPO_PRIORITARIAS] + list(GRUPOS_CALCULADORAS)
             self.var_grupo = tk.StringVar(value=GRUPO_PRIORITARIAS)
             cb = ttk.Combobox(fila, textvariable=self.var_grupo,
                               values=self._grupos_ui, state="readonly",
-                              width=32, font=("Segoe UI", 10))
+                              width=32, font=(FUENTE_SISTEMA, 10))
             cb.pack(side="left", padx=6)
             cb.bind("<<ComboboxSelected>>", lambda e: self._poblar_lista())
-            self.lista = tk.Listbox(marco, height=7, font=("Segoe UI", 10),
+            self.lista = tk.Listbox(marco, height=7, font=(FUENTE_SISTEMA, 10),
                                     bg=BLANCO, fg=TEXTO_OSCURO, relief="solid",
                                     bd=1, selectbackground=AZUL,
                                     selectforeground=TEXTO_CLARO)
@@ -6976,18 +7036,18 @@ if TK_DISPONIBLE:
                                       command=self._alternar_prioritaria,
                                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO,
                                       activebackground=GRIS_APAGADO,
-                                      font=("Segoe UI", 9), pady=2)
+                                      font=(FUENTE_SISTEMA, 9), pady=2)
             self.btn_star.pack(side="right", pady=(8, 2))
             Tooltip(self.btn_star,
                     "Fija esta calculadora en ★ Prioritarias (flujo rapido); "
                     "el consultorio define su lista en _CONFIG.json")
-            self.lbl_titulo = tk.Label(marco, text="", font=("Segoe UI", 12, "bold"),
+            self.lbl_titulo = tk.Label(marco, text="", font=(FUENTE_SISTEMA, 12, "bold"),
                                        bg=CREMA_CLARO, fg=AZUL, anchor="w")
             self.lbl_titulo.pack(side="left", fill="x", expand=True, pady=(8, 2))
             self.campos_frame = tk.Frame(marco, bg=CREMA_CLARO)
             self.campos_frame.pack(fill="x")
             self.lbl_formula = tk.Label(marco, text="", bg=CREMA_CLARO,
-                                        fg=GRIS_TEXTO, font=("Segoe UI", 9),
+                                        fg=GRIS_TEXTO, font=(FUENTE_SISTEMA, 9),
                                         anchor="w", justify="left", wraplength=560)
             self.lbl_formula.pack(fill="x", pady=(4, 0))
             # resultado
@@ -6995,27 +7055,27 @@ if TK_DISPONIBLE:
                                      highlightbackground=GRIS_BORDE)
             self.caja_res.pack(fill="x", pady=(8, 0))
             self.lbl_res_valor = tk.Label(self.caja_res, text="—",
-                                          font=("Segoe UI", 22, "bold"),
+                                          font=(FUENTE_SISTEMA, 22, "bold"),
                                           bg="#F4F7FB", fg=GRIS_TEXTO, anchor="w")
             self.lbl_res_valor.pack(fill="x", padx=12, pady=(8, 0))
             self.lbl_res_banda = tk.Label(self.caja_res, text="Introduce los datos y pulsa Calcular",
-                                          font=("Segoe UI", 10, "bold"),
+                                          font=(FUENTE_SISTEMA, 10, "bold"),
                                           bg="#F4F7FB", fg=GRIS_TEXTO, anchor="w")
             self.lbl_res_banda.pack(fill="x", padx=12, pady=(0, 4))
             self.lbl_res_msg = tk.Label(self.caja_res, text="", bg="#F4F7FB",
-                                        fg=GRIS_TEXTO, font=("Segoe UI", 9),
+                                        fg=GRIS_TEXTO, font=(FUENTE_SISTEMA, 9),
                                         anchor="w", wraplength=560, justify="left")
             self.lbl_res_msg.pack(fill="x", padx=12, pady=(0, 8))
             pie = tk.Frame(marco, bg=CREMA_CLARO)
             pie.pack(fill="x", pady=(8, 0))
             tk.Button(pie, text="Guardar en la nota", command=self._guardar_nota,
                       bg=VERDE_OK, fg=TEXTO_CLARO, activebackground="#14602F",
-                      font=("Segoe UI", 10, "bold"), padx=10, pady=6
+                      font=(FUENTE_SISTEMA, 10, "bold"), padx=10, pady=6
                       ).pack(side="left")
             # ADR-0034: sin boton Calcular; recalculo en vivo via trace
             tk.Label(pie, text="Resultado en vivo — sin boton",
                      bg=CREMA_CLARO, fg=GRIS_TERCIARIO,
-                     font=("Segoe UI", 8)).pack(side="right", padx=6)
+                     font=(FUENTE_SISTEMA, 8)).pack(side="right", padx=6)
             tk.Button(pie, text="Ver pacientes",
                       command=lambda: self.app.show_page("home"),
                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO,
@@ -7023,7 +7083,7 @@ if TK_DISPONIBLE:
                       ).pack(side="right", padx=6)
             tk.Label(marco, text="Estratifica riesgo; no sustituye el juicio clinico "
                                  "(ADR-0013). Cifras del catalogo del medico.",
-                     bg=CREMA_CLARO, fg=GRIS_TERCIARIO, font=("Segoe UI", 8),
+                     bg=CREMA_CLARO, fg=GRIS_TERCIARIO, font=(FUENTE_SISTEMA, 8),
                      anchor="w", wraplength=560, justify="left").pack(fill="x",
                                                                       pady=(6, 0))
             self._calc_actual = None
@@ -7158,22 +7218,22 @@ if TK_DISPONIBLE:
                     var = tk.BooleanVar(value=False)
                     tk.Checkbutton(self.campos_frame, text=lbl, variable=var,
                                    bg=CREMA_CLARO, fg=TEXTO_OSCURO,
-                                   selectcolor=BLANCO, font=("Segoe UI", 10),
+                                   selectcolor=BLANCO, font=(FUENTE_SISTEMA, 10),
                                    anchor="w").grid(row=i, column=0, columnspan=2,
                                                     sticky="w", pady=1)
                 else:
                     tk.Label(self.campos_frame, text=lbl, bg=CREMA_CLARO,
-                             fg=TEXTO_OSCURO, font=("Segoe UI", 10), anchor="w"
+                             fg=TEXTO_OSCURO, font=(FUENTE_SISTEMA, 10), anchor="w"
                              ).grid(row=i, column=0, sticky="w", pady=1,
                                     padx=(0, 8))
                     var = tk.StringVar()
                     if tipo == "txt" and fid == "sexo":
                         w = ttk.Combobox(self.campos_frame, textvariable=var,
                                          values=("M", "F"), width=8,
-                                         font=("Segoe UI", 10))
+                                         font=(FUENTE_SISTEMA, 10))
                     else:
                         w = tk.Entry(self.campos_frame, textvariable=var,
-                                     font=("Segoe UI", 10), bg=BLANCO, width=12)
+                                     font=(FUENTE_SISTEMA, 10), bg=BLANCO, width=12)
                     w.grid(row=i, column=1, sticky="w", pady=1)
                     w.bind("<Return>", lambda e: self._calcular())
                 self._vars[fid] = (tipo, var)
@@ -7337,7 +7397,7 @@ if TK_DISPONIBLE:
             marco.pack(fill="both", expand=True)
             d = self.app.datos_activos or {}
             tk.Label(marco, text=f"Linea de tiempo — {d.get('nombre_completo','?')}",
-                     font=("Segoe UI", 13, "bold"), bg=CREMA_CLARO, fg=AZUL
+                     font=(FUENTE_SISTEMA, 13, "bold"), bg=CREMA_CLARO, fg=AZUL
                      ).pack(anchor="w")
             # filtros por tipo
             fila_f = tk.Frame(marco, bg=CREMA_CLARO)
@@ -7347,8 +7407,8 @@ if TK_DISPONIBLE:
                 tk.Radiobutton(fila_f, text=txt.capitalize(), variable=self.var_filtro,
                                value=txt, command=self._refrescar, bg=CREMA_CLARO,
                                fg=TEXTO_OSCURO, selectcolor=BLANCO,
-                               font=("Segoe UI", 9)).pack(side="left", padx=2)
-            self.lista = tk.Listbox(marco, height=16, font=("Segoe UI", 9),
+                               font=(FUENTE_SISTEMA, 9)).pack(side="left", padx=2)
+            self.lista = tk.Listbox(marco, height=16, font=(FUENTE_SISTEMA, 9),
                                     bg=BLANCO, fg=TEXTO_OSCURO, relief="solid", bd=1,
                                     selectbackground=AZUL, selectforeground=TEXTO_CLARO)
             self.lista.pack(fill="both", expand=True, pady=(6, 0))
@@ -7462,9 +7522,9 @@ if TK_DISPONIBLE:
             try:
                 estilo = ttk.Style(self)
                 estilo.configure("Treeview", rowheight=26,
-                                 font=("Segoe UI", FUENTE_S))
+                                 font=(FUENTE_SISTEMA, FUENTE_S))
                 estilo.configure("Treeview.Heading",
-                                 font=("Segoe UI", FUENTE_S, "bold"))
+                                 font=(FUENTE_SISTEMA, FUENTE_S, "bold"))
                 estilo.map("Treeview",
                            background=[("selected", AZUL)],
                            foreground=[("selected", TEXTO_CLARO)])
@@ -7487,32 +7547,32 @@ if TK_DISPONIBLE:
             sidebar = tk.Frame(self, bg=NAV_BG, width=215)
             sidebar.grid(row=0, column=0, sticky="nsew")
             sidebar.grid_propagate(False)
-            tk.Label(sidebar, text="MATERNIDAD", font=("Segoe UI", 17, "bold"),
+            tk.Label(sidebar, text="MATERNIDAD", font=(FUENTE_SISTEMA, 17, "bold"),
                      bg=NAV_BG, fg=BLANCO).pack(pady=(16, 0))
             tk.Frame(sidebar, bg=ACENTO, height=3).pack(fill="x", padx=18, pady=(4, 2))
-            tk.Label(sidebar, text=f"Expedientes · v{VERSION}", font=("Segoe UI", 8),
+            tk.Label(sidebar, text=f"Expedientes · v{VERSION}", font=(FUENTE_SISTEMA, 8),
                      bg=NAV_BG, fg=NAV_PIE).pack(anchor="w", padx=18, pady=(0, 8))
             # Tarjeta de contexto: el medico siempre ve con quién trabaja
             tarjeta = tk.Frame(sidebar, bg=NAV_TARJETA, highlightthickness=1,
                                highlightbackground="#1A3F6A")
             tarjeta.pack(fill="x", padx=10, pady=(0, 6))
-            tk.Label(tarjeta, text="EN CONTEXTO", font=("Segoe UI", 7, "bold"),
+            tk.Label(tarjeta, text="EN CONTEXTO", font=(FUENTE_SISTEMA, 7, "bold"),
                      bg=NAV_TARJETA, fg=ACENTO, anchor="w"
                      ).pack(fill="x", padx=10, pady=(6, 0))
             self.nav_ctx_nombre = tk.Label(
                 tarjeta, text="Sin paciente seleccionada",
-                font=("Segoe UI", 10, "bold"), bg=NAV_TARJETA, fg=NAV_TEXTO,
+                font=(FUENTE_SISTEMA, 10, "bold"), bg=NAV_TARJETA, fg=NAV_TEXTO,
                 anchor="w", wraplength=180, justify="left")
             self.nav_ctx_nombre.pack(fill="x", padx=10)
             self.nav_ctx_epi = tk.Label(
-                tarjeta, text="", font=("Segoe UI", 8), bg=NAV_TARJETA,
+                tarjeta, text="", font=(FUENTE_SISTEMA, 8), bg=NAV_TARJETA,
                 fg=NAV_LEYENDA, anchor="w", wraplength=180)
             self.nav_ctx_epi.pack(fill="x", padx=10, pady=(0, 8))
             self.lbl_sidebar_ctx = self.nav_ctx_nombre  # alias (smoke/contratos)
 
             def _sep(txt):
                 tk.Label(sidebar, text=txt, bg=NAV_BG, fg=NAV_LEYENDA,
-                         font=("Segoe UI", 8, "bold"), anchor="w", padx=16
+                         font=(FUENTE_SISTEMA, 8, "bold"), anchor="w", padx=16
                          ).pack(fill="x", pady=(10, 2))
                 tk.Frame(sidebar, bg="#16385F", height=1).pack(fill="x", padx=16)
 
@@ -7555,7 +7615,7 @@ if TK_DISPONIBLE:
                     b = tk.Button(cont, text=f"  {glifo}  {texto}", command=accion,
                                   relief="flat", bg=NAV_BG, fg=NAV_TEXTO,
                                   activebackground=NAV_TARJETA, activeforeground=BLANCO,
-                                  font=("Segoe UI", 11), anchor="w", padx=10,
+                                  font=(FUENTE_SISTEMA, 11), anchor="w", padx=10,
                                   pady=6, cursor="hand2")
                     b.pack(side="left", fill="x", expand=True, padx=(6, 0))
                     b.bind("<Enter>", lambda e, bb=b, t=texto: bb.config(
@@ -7581,10 +7641,10 @@ if TK_DISPONIBLE:
             tk.Frame(sidebar, bg="#16385F", height=1).pack(
                 side="bottom", fill="x", padx=14, pady=(8, 2))
             tk.Label(sidebar, text="Datos 100% locales · sin internet",
-                     bg=NAV_BG, fg=NAV_PIE, font=("Segoe UI", 8), anchor="w"
+                     bg=NAV_BG, fg=NAV_PIE, font=(FUENTE_SISTEMA, 8), anchor="w"
                      ).pack(side="bottom", fill="x", padx=16, pady=(0, 12))
             self.lbl_nav_autor = tk.Label(sidebar, text=f"Autor: {autor_actual()}",
-                                          bg=NAV_BG, fg=NAV_PIE, font=("Segoe UI", 8),
+                                          bg=NAV_BG, fg=NAV_PIE, font=(FUENTE_SISTEMA, 8),
                                           anchor="w")
             self.lbl_nav_autor.pack(side="bottom", fill="x", padx=16)
 
@@ -7597,18 +7657,18 @@ if TK_DISPONIBLE:
             hdr.grid_columnconfigure(1, weight=1)
             col_tit = tk.Frame(hdr, bg=CREMA)
             col_tit.grid(row=0, column=0, sticky="w")
-            self.header = tk.Label(col_tit, text="Inicio", font=("Segoe UI", 18, "bold"),
+            self.header = tk.Label(col_tit, text="Inicio", font=(FUENTE_SISTEMA, 18, "bold"),
                                    bg=CREMA, fg=TEXTO_OSCURO)
             self.header.pack(anchor="w")
             # Subtítulo por pantalla/pestaña: identidad de cada contrato
-            self.header_sub = tk.Label(col_tit, text="", font=("Segoe UI", 9),
+            self.header_sub = tk.Label(col_tit, text="", font=(FUENTE_SISTEMA, 9),
                                        bg=CREMA, fg=GRIS_TEXTO)
             self.header_sub.pack(anchor="w")
             # Acciones del encabezado: la acción primaria vive arriba a la derecha
             self.header_acc = tk.Frame(hdr, bg=CREMA)
             self.header_acc.grid(row=0, column=2, sticky="e")
             self.lbl_autor = tk.Label(hdr, text=f"Autor: {autor_actual()}",
-                                      font=("Segoe UI", 9), bg=CREMA, fg=GRIS_SECUNDARIO)
+                                      font=(FUENTE_SISTEMA, 9), bg=CREMA, fg=GRIS_SECUNDARIO)
             self.lbl_autor.grid(row=0, column=1, sticky="ne")
             self.pages_box = tk.Frame(main, bg=CREMA_CLARO)
             self.pages_box.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 8))
@@ -7616,7 +7676,7 @@ if TK_DISPONIBLE:
             self.pages_box.grid_columnconfigure(0, weight=1)
             self.status = tk.StringVar(value="Listo")
             tk.Label(self, textvariable=self.status, anchor="w", bg=AZUL,
-                     fg=TEXTO_CLARO, font=("Segoe UI", 9), height=1
+                     fg=TEXTO_CLARO, font=(FUENTE_SISTEMA, 9), height=1
                      ).grid(row=1, column=0, columnspan=2, sticky="we")
             self.progreso = ttk.Progressbar(self, mode="indeterminate", length=240)
             self.progreso.grid(row=2, column=0, columnspan=2, sticky="we", padx=14, pady=3)
@@ -7721,7 +7781,7 @@ if TK_DISPONIBLE:
                 b.config(bg=BLANCO if activo else NAV_BG,
                          fg=NAV_BG if activo else (ROJO_SALIR if texto == "Salir"
                                                    else NAV_TEXTO),
-                         font=("Segoe UI", 11, "bold" if activo else "normal"))
+                         font=(FUENTE_SISTEMA, 11, "bold" if activo else "normal"))
                 barra = self.nav_barras.get(texto)
                 if barra is not None:
                     barra.config(bg=ACENTO if activo else NAV_BG)
@@ -7743,13 +7803,13 @@ if TK_DISPONIBLE:
                 if primario:
                     tk.Button(self.header_acc, text=f"▸ {txt}", command=cmd, bg=AZUL,
                               fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                              font=("Segoe UI", 10, "bold"), padx=12, pady=6,
+                              font=(FUENTE_SISTEMA, 10, "bold"), padx=12, pady=6,
                               cursor="hand2").pack(side="right", padx=4)
                 else:
                     tk.Button(self.header_acc, text=txt, command=cmd, bg=BLANCO,
                               fg=AZUL, activebackground="#E8EEF6", relief="flat",
                               highlightthickness=1, highlightbackground=GRIS_BORDE,
-                              font=("Segoe UI", 10), padx=12, pady=6,
+                              font=(FUENTE_SISTEMA, 10), padx=12, pady=6,
                               cursor="hand2").pack(side="right", padx=4)
 
         def _subtitulo_pestana(self):
@@ -7937,29 +7997,29 @@ if TK_DISPONIBLE:
                                       highlightbackground=GRIS_BORDE)
             self.frame_hoy.grid(row=1, column=0, sticky="we", padx=16, pady=(0, 4))
             self.lbl_hoy = tk.Label(self.frame_hoy, text="HOY", bg=BLANCO, fg=AZUL,
-                                    font=("Segoe UI", 9, "bold"), anchor="w", padx=10)
+                                    font=(FUENTE_SISTEMA, 9, "bold"), anchor="w", padx=10)
             self.lbl_hoy.pack(fill="x", padx=6, pady=(6, 0))
             self.caja_hoy = tk.Frame(self.frame_hoy, bg=BLANCO)
             self.caja_hoy.pack(fill="x", padx=8, pady=(2, 8))
 
             tk.Label(home, text="Busca por nombre, CURP, telefono o correo",
-                     font=("Segoe UI", 10), bg=CREMA_CLARO,
+                     font=(FUENTE_SISTEMA, 10), bg=CREMA_CLARO,
                      fg=GRIS_TEXTO).grid(row=2, column=0, sticky="w", padx=18)
             marco_busq = tk.Frame(home, bg=CREMA_CLARO)
             marco_busq.grid(row=3, column=0, sticky="we", padx=16, pady=8)
             marco_busq.grid_columnconfigure(0, weight=1)
             self.search_var = tk.StringVar()
             self.entry_busqueda_home = tk.Entry(marco_busq, textvariable=self.search_var,
-                                                font=("Segoe UI", 12), bg=BLANCO,
+                                                font=(FUENTE_SISTEMA, 12), bg=BLANCO,
                                                 fg=TEXTO_OSCURO, relief="solid", bd=1)
             self.entry_busqueda_home.grid(row=0, column=0, sticky="we", padx=(0, 6))
             self.search_var.trace_add("write", self._programar_busqueda)
             tk.Button(marco_busq, text="Buscar", command=self._ejecutar_busqueda,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                      font=("Segoe UI", 10)).grid(row=0, column=1, padx=3)
+                      font=(FUENTE_SISTEMA, 10)).grid(row=0, column=1, padx=3)
             tk.Button(marco_busq, text="Filtros", command=self._dialogo_filtros,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                      font=("Segoe UI", 10)).grid(row=0, column=2, padx=3)
+                      font=(FUENTE_SISTEMA, 10)).grid(row=0, column=2, padx=3)
             self.fila_chips = tk.Frame(home, bg=CREMA_CLARO)
             self.fila_chips.grid(row=4, column=0, sticky="we", padx=16, pady=(0, 6))
             self.fila_chips.grid_remove()
@@ -8016,7 +8076,7 @@ if TK_DISPONIBLE:
             acc_col.grid_propagate(False)
             self.lbl_ctx_home = tk.Label(
                 acc_col, text="Sin paciente",
-                font=("Segoe UI", 9, "bold"), bg=BLANCO, fg=ROJO_AVISO,
+                font=(FUENTE_SISTEMA, 9, "bold"), bg=BLANCO, fg=ROJO_AVISO,
                 anchor="w", wraplength=140, justify="left", padx=8)
             self.lbl_ctx_home.pack(fill="x", pady=(8, 4))
             tk.Frame(acc_col, bg=GRIS_BORDE, height=1).pack(fill="x", padx=6, pady=2)
@@ -8032,18 +8092,18 @@ if TK_DISPONIBLE:
                 tk.Button(acc_col, text=txt, command=cmd,
                           bg=AZUL if prim else GRIS_SECUNDARIO, fg=TEXTO_CLARO,
                           activebackground=AZUL_HOVER if prim else GRIS_APAGADO,
-                          font=("Segoe UI", 9, "bold" if prim else "normal"),
+                          font=(FUENTE_SISTEMA, 9, "bold" if prim else "normal"),
                           anchor="w", padx=8, pady=3).pack(fill="x", padx=6, pady=2)
 
             self.frame_vacio_home = tk.Frame(home, bg=CREMA_CLARO)
             self.frame_vacio_home.grid(row=6, column=0, sticky="we", padx=16, pady=4)
             tk.Label(self.frame_vacio_home, text="Aun no hay pacientes registradas.",
-                     font=("Segoe UI", 12), bg=CREMA_CLARO, fg=TEXTO_OSCURO
+                     font=(FUENTE_SISTEMA, 12), bg=CREMA_CLARO, fg=TEXTO_OSCURO
                      ).pack(anchor="w")
             tk.Button(self.frame_vacio_home, text=" Registrar primera paciente",
                       command=lambda: self.show_page("register"),
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                      font=("Segoe UI", 10, "bold"), padx=10, pady=4
+                      font=(FUENTE_SISTEMA, 10, "bold"), padx=10, pady=4
                       ).pack(anchor="w", pady=4)
             self.frame_vacio_home.grid_remove()
             marco_btns = tk.Frame(home, bg=CREMA_CLARO)
@@ -8058,7 +8118,7 @@ if TK_DISPONIBLE:
             ]:
                 bb = tk.Button(marco_btns, text=txt, command=cmd, bg=GRIS_SECUNDARIO,
                                fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
-                               font=("Segoe UI", 10), padx=12, pady=BTN_PADY)
+                               font=(FUENTE_SISTEMA, 10), padx=12, pady=BTN_PADY)
                 bb.pack(side="left", padx=4)
                 if txt in tips_home:
                     Tooltip(bb, tips_home[txt])
@@ -8193,11 +8253,11 @@ if TK_DISPONIBLE:
 
             def _bloque(col, titulo, items, izq):
                 tk.Label(col, text=titulo, bg=BLANCO, fg=GRIS_TEXTO,
-                         font=("Segoe UI", 9, "bold"), anchor="w"
+                         font=(FUENTE_SISTEMA, 9, "bold"), anchor="w"
                          ).pack(fill="x", pady=(0, 2))
                 if not items:
                     tk.Label(col, text="(ninguno)", bg=BLANCO, fg=GRIS_APAGADO,
-                             font=("Segoe UI", 9), anchor="w").pack(fill="x")
+                             font=(FUENTE_SISTEMA, 9), anchor="w").pack(fill="x")
                     return
                 for nombre, ruta, ult, delta in items[:5]:
                     if izq:
@@ -8206,15 +8266,15 @@ if TK_DISPONIBLE:
                                       self.seleccionar_paciente(rr, origen="home"),
                                       bg=BLANCO, fg=AZUL, relief="flat",
                                       activebackground="#E8EEF6", anchor="w",
-                                      font=("Segoe UI", 9), cursor="hand2")
+                                      font=(FUENTE_SISTEMA, 9), cursor="hand2")
                     else:
                         txt = f"● {nombre} · hace {delta} d (ult. {fecha_legible(ult)})"
                         b = tk.Label(col, text=txt, bg=BLANCO, fg=ROJO_AVISO,
-                                     font=("Segoe UI", 9), anchor="w")
+                                     font=(FUENTE_SISTEMA, 9), anchor="w")
                     b.pack(fill="x")
                 if len(items) > 5:
                     tk.Label(col, text=f"+{len(items) - 5} mas…", bg=BLANCO,
-                             fg=GRIS_APAGADO, font=("Segoe UI", 8),
+                             fg=GRIS_APAGADO, font=(FUENTE_SISTEMA, 8),
                              anchor="w").pack(fill="x")
 
             _bloque(col_izq, f"CONTROLES DE LOS ULTIMOS 7 DIAS",
@@ -8243,7 +8303,7 @@ if TK_DISPONIBLE:
             cuerpo = tk.Frame(win, bg=CREMA_CLARO, padx=12, pady=10)
             cuerpo.pack(fill="both", expand=True)
             tk.Label(cuerpo, text="Resumen de consulta (1 pagina)",
-                     font=("Segoe UI", 12, "bold"), bg=CREMA_CLARO,
+                     font=(FUENTE_SISTEMA, 12, "bold"), bg=CREMA_CLARO,
                      fg=TEXTO_OSCURO).pack(anchor="w")
             caja = tk.Text(cuerpo, width=86, height=26, font=("Courier", 10),
                            bg=BLANCO, fg=TEXTO_OSCURO, relief="solid", bd=1,
@@ -8268,7 +8328,7 @@ if TK_DISPONIBLE:
             pie.pack(fill="x")
             tk.Button(pie, text="Generar archivo y abrir", command=_archivo,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                      font=("Segoe UI", 10, "bold"), padx=10, pady=6
+                      font=(FUENTE_SISTEMA, 10, "bold"), padx=10, pady=6
                       ).pack(side="left")
             tk.Button(pie, text="Cerrar", command=win.destroy, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
@@ -8309,18 +8369,18 @@ if TK_DISPONIBLE:
                 self.fila_chips.grid_remove()
                 return
             tk.Label(self.fila_chips, text="Filtros:", bg=CREMA_CLARO,
-                     fg=GRIS_TEXTO, font=("Segoe UI", FUENTE_XS)
+                     fg=GRIS_TEXTO, font=(FUENTE_SISTEMA, FUENTE_XS)
                      ).pack(side="left", padx=(0, ESP_XS))
             for clave, texto in activos:
                 chip = tk.Frame(self.fila_chips, bg=AZUL_CHIP, highlightthickness=1,
                                 highlightbackground=GRIS_BORDE)
                 chip.pack(side="left", padx=(0, ESP_S))
                 tk.Label(chip, text=f" {texto} ", bg=AZUL_CHIP, fg=TEXTO_OSCURO,
-                         font=("Segoe UI", FUENTE_XS)).pack(side="left")
+                         font=(FUENTE_SISTEMA, FUENTE_XS)).pack(side="left")
                 tk.Button(chip, text="×", command=lambda k=clave: self._quitar_chip(k),
                           bg=AZUL_CHIP, fg=ROJO_AVISO, activebackground=AZUL_CHIP,
                           activeforeground=ROJO_AVISO, relief="flat", bd=0,
-                          font=("Segoe UI", FUENTE_M, "bold"), cursor="hand2"
+                          font=(FUENTE_SISTEMA, FUENTE_M, "bold"), cursor="hand2"
                           ).pack(side="right", padx=(0, ESP_XS))
             self.fila_chips.grid()
 
@@ -8469,7 +8529,7 @@ if TK_DISPONIBLE:
             win.resizable(False, False)
             marco = tk.Frame(win, bg=CREMA_CLARO, padx=14, pady=14)
             marco.pack(fill="both", expand=True, padx=10, pady=10)
-            tk.Label(marco, text="Filtros", font=("Segoe UI", 14, "bold"),
+            tk.Label(marco, text="Filtros", font=(FUENTE_SISTEMA, 14, "bold"),
                      bg=CREMA_CLARO, fg=TEXTO_OSCURO).grid(row=0, column=0, columnspan=2, pady=(0, 8))
             campos = {}
             vars_campos = {}
@@ -8479,7 +8539,7 @@ if TK_DISPONIBLE:
                 tk.Label(marco, text=lab, bg=CREMA_CLARO, fg=TEXTO_OSCURO
                          ).grid(row=i, column=0, sticky="w", pady=5, padx=(0, 8))
                 var = tk.StringVar()
-                e = tk.Entry(marco, font=("Segoe UI", 11), width=24, bg=BLANCO,
+                e = tk.Entry(marco, font=(FUENTE_SISTEMA, 11), width=24, bg=BLANCO,
                              textvariable=var)
                 e.grid(row=i, column=1, sticky="we", pady=5)
                 campos[lab] = e
@@ -8521,9 +8581,9 @@ if TK_DISPONIBLE:
 
             tk.Button(marco, text="Limpiar filtros", command=limpiar,
                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
-                      font=("Segoe UI", 11)).grid(row=4, column=0, pady=14, sticky="w")
+                      font=(FUENTE_SISTEMA, 11)).grid(row=4, column=0, pady=14, sticky="w")
             tk.Button(marco, text="Aplicar", command=aplicar, bg=AZUL, fg=TEXTO_CLARO,
-                      activebackground=AZUL_HOVER, font=("Segoe UI", 11)
+                      activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 11)
                       ).grid(row=4, column=1, pady=14, sticky="e")
             win.bind("<Escape>", lambda ev: win.destroy())
             auto_tamano(win, self)
@@ -8540,16 +8600,16 @@ if TK_DISPONIBLE:
                                 highlightbackground=GRIS_BORDE)
             ctx_card.grid(row=0, column=0, sticky="we", padx=16, pady=(8, 2))
             self.lbl_graf_ctx = tk.Label(ctx_card, text="Ninguna paciente en contexto",
-                                         font=("Segoe UI", 11, "bold"), bg=BLANCO,
+                                         font=(FUENTE_SISTEMA, 11, "bold"), bg=BLANCO,
                                          fg=ROJO_AVISO, anchor="w", padx=10)
             self.lbl_graf_ctx.pack(fill="x", pady=(7, 2))
             # U134: tira FUM|FPP|EG (mismo dato de cabecera que Inicio/Documentos)
-            self.lbl_graf_tira = tk.Label(ctx_card, text="", font=("Segoe UI", 9),
+            self.lbl_graf_tira = tk.Label(ctx_card, text="", font=(FUENTE_SISTEMA, 9),
                                           bg=BLANCO, fg=GRIS_TEXTO, anchor="w",
                                           padx=10)
             self.lbl_graf_tira.pack(fill="x", pady=(0, 2))
             # U133: línea de fuentes honesta (se calcula DESPUÉS de leer)
-            self.lbl_graf_fuentes = tk.Label(ctx_card, text="", font=("Segoe UI", 9, "bold"),
+            self.lbl_graf_fuentes = tk.Label(ctx_card, text="", font=(FUENTE_SISTEMA, 9, "bold"),
                                              bg=BLANCO, fg=GRIS_TEXTO, anchor="w",
                                              padx=10)
             self.lbl_graf_fuentes.pack(fill="x", pady=(0, 7))
@@ -8565,13 +8625,13 @@ if TK_DISPONIBLE:
                 if prim:
                     tk.Button(acciones, text=f"▸ {txt}", command=cmd, bg=AZUL,
                               fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                              font=("Segoe UI", 10, "bold"), padx=10,
+                              font=(FUENTE_SISTEMA, 10, "bold"), padx=10,
                               pady=BTN_PADY).pack(side="left", padx=4)
                 else:
                     tk.Button(acciones, text=txt, command=cmd, bg=BLANCO, fg=AZUL,
                               activebackground="#E8EEF6", relief="flat",
                               highlightthickness=1, highlightbackground=GRIS_BORDE,
-                              font=("Segoe UI", 10), padx=10,
+                              font=(FUENTE_SISTEMA, 10), padx=10,
                               pady=BTN_PADY).pack(side="left", padx=4)
             marco = tk.Frame(pag, bg=BLANCO, highlightthickness=1,
                              highlightbackground=GRIS_BORDE)
@@ -8825,14 +8885,14 @@ if TK_DISPONIBLE:
                     card.grid(row=r, column=c, sticky="nsew", padx=(0, 8), pady=4)
                     fila_t = tk.Frame(card, bg="#F4F7FB")
                     fila_t.pack(fill="x", padx=8, pady=(6, 0))
-                    tk.Label(fila_t, text=e["titulo"], font=("Segoe UI", 8, "bold"),
+                    tk.Label(fila_t, text=e["titulo"], font=(FUENTE_SISTEMA, 8, "bold"),
                              bg="#F4F7FB", fg=GRIS_TEXTO, anchor="w"
                              ).pack(side="left", fill="x", expand=True)
-                    tk.Label(fila_t, text=e["badge"], font=("Segoe UI", 7, "bold"),
+                    tk.Label(fila_t, text=e["badge"], font=(FUENTE_SISTEMA, 7, "bold"),
                              bg="#F4F7FB", fg=badge_col, anchor="e"
                              ).pack(side="right")
                     tk.Label(card, text=f"{valor:g}" if isinstance(valor, (int, float))
-                             else str(valor), font=("Segoe UI", 15, "bold"),
+                             else str(valor), font=(FUENTE_SISTEMA, 15, "bold"),
                              bg="#F4F7FB", fg=AZUL, anchor="w"
                              ).pack(fill="x", padx=8)
                     rango = []
@@ -8841,7 +8901,7 @@ if TK_DISPONIBLE:
                     if media is not None:
                         rango.append(f"media {media:g}")
                     if rango:
-                        tk.Label(card, text=" · ".join(rango), font=("Segoe UI", 8),
+                        tk.Label(card, text=" · ".join(rango), font=(FUENTE_SISTEMA, 8),
                                  bg="#F4F7FB", fg=GRIS_TERCIARIO, anchor="w"
                                  ).pack(fill="x", padx=8)
                     meta = []
@@ -8853,7 +8913,7 @@ if TK_DISPONIBLE:
                     if not meta:
                         meta.append(f"{len([1 for _, pts, _ in e['lineas'] for _ in pts])}"
                                     " mediciones")
-                    tk.Label(card, text=" · ".join(meta), font=("Segoe UI", 8),
+                    tk.Label(card, text=" · ".join(meta), font=(FUENTE_SISTEMA, 8),
                              bg="#F4F7FB", fg=GRIS_TEXTO, anchor="w"
                              ).pack(fill="x", padx=8, pady=(0, 6))
                 # U138: leyenda de fuentes (si hay mezcla)
@@ -8865,7 +8925,7 @@ if TK_DISPONIBLE:
                     for col, txt in ((AZUL, "— Excel del médico"),
                                      (VERDE_OK, "— Controles")):
                         tk.Label(ley, text=txt, bg=BLANCO, fg=col,
-                                 font=("Segoe UI", 8, "bold")).pack(side="left", padx=(0, 12))
+                                 font=(FUENTE_SISTEMA, 8, "bold")).pack(side="left", padx=(0, 12))
             # --- U144: secciones por fuente con encabezado ---
             for grupo, texto in (
                     ("excel", "Series del Progreso Químico (tu hoja)"),
@@ -8876,7 +8936,7 @@ if TK_DISPONIBLE:
                 tk.Frame(self._graf_caja, bg=GRIS_BORDE, height=1).pack(
                     fill="x", padx=16, pady=(8, 2))
                 tk.Label(self._graf_caja, text=texto, bg=BLANCO, fg=AZUL,
-                         font=("Segoe UI", 9, "bold"), anchor="w"
+                         font=(FUENTE_SISTEMA, 9, "bold"), anchor="w"
                          ).pack(fill="x", padx=16)
                 for e in sub:
                     self._graf_mini(e["titulo"], e["lineas"], e["badge"])
@@ -8884,20 +8944,20 @@ if TK_DISPONIBLE:
                 tk.Label(self._graf_caja,
                          text=f"+{ocultas} series no mostradas — "
                               f"GRAF_MAX_SERIES ({GRAF_MAX_SERIES}) en app.py",
-                         bg=BLANCO, fg=GRIS_TERCIARIO, font=("Segoe UI", 8),
+                         bg=BLANCO, fg=GRIS_TERCIARIO, font=(FUENTE_SISTEMA, 8),
                          anchor="w").pack(fill="x", padx=16, pady=(0, 8))
 
         def _graf_mensaje(self, texto, ctas=()):
             """Estado vacío accionable (U142): mensaje + CTA inline."""
             tk.Label(self._graf_caja, text=texto, bg=BLANCO, fg=GRIS_TEXTO,
-                     font=("Segoe UI", 11), justify="left", wraplength=560,
+                     font=(FUENTE_SISTEMA, 11), justify="left", wraplength=560,
                      padx=16).pack(anchor="w", pady=(16, 4))
             if ctas:
                 fila = tk.Frame(self._graf_caja, bg=BLANCO)
                 fila.pack(anchor="w", padx=16, pady=(0, 12))
                 for txt, cmd in ctas:
                     tk.Button(fila, text=txt, command=cmd, bg=AZUL, fg=TEXTO_CLARO,
-                              activebackground=AZUL_HOVER, font=("Segoe UI", 10),
+                              activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 10),
                               padx=10, pady=BTN_PADY).pack(side="left", padx=(0, 8))
 
         def _graf_mini(self, titulo, lineas, badge=""):
@@ -8910,7 +8970,7 @@ if TK_DISPONIBLE:
             cab.pack(fill="x")
             tk.Label(cab, text=f"{titulo}   {badge and '[' + badge + ']'}",
                      bg=BLANCO, fg=TEXTO_OSCURO,
-                     font=("Segoe UI", FUENTE_M, "bold")).pack(anchor="w")
+                     font=(FUENTE_SISTEMA, FUENTE_M, "bold")).pack(anchor="w")
             # --- proyección temporal compartida por TODAS las líneas (B95) ---
             bases = []
             for _, pts, _ in lineas:
@@ -8974,7 +9034,7 @@ if TK_DISPONIBLE:
                 lienzo.create_line(izq, yy, W - der, yy, fill="#E9EDF3",
                                    dash=(2, 3))
                 lienzo.create_text(izq - 6, yy, text=f"{v:g}", anchor="e",
-                                   fill=GRIS_TERCIARIO, font=("Segoe UI", 8))
+                                   fill=GRIS_TERCIARIO, font=(FUENTE_SISTEMA, 8))
             lienzo.create_line(izq, arr, izq, H - abj, fill=GRIS_BORDE)
             lienzo.create_line(izq, H - abj, W - der, H - abj, fill=GRIS_BORDE)
             # --- series: segmentos (el hueco > umbral queda como línea ausente) ---
@@ -9007,7 +9067,7 @@ if TK_DISPONIBLE:
                 iso = parsear_fecha(str(et))
                 txt = fecha_legible(iso) if iso else str(et)[:10]
                 lienzo.create_text(x(xval), H - abj + 12, text=txt, anchor="n",
-                                   fill=GRIS_TEXTO, font=("Segoe UI", 8))
+                                   fill=GRIS_TEXTO, font=(FUENTE_SISTEMA, 8))
             lienzo._puntos = puntos_hover
             lienzo.bind("<Motion>", lambda ev, cv=lienzo: self._graf_hover(cv, ev))
             lienzo.bind("<Leave>", lambda ev, cv=lienzo: cv.delete("hov"))
@@ -9033,7 +9093,7 @@ if TK_DISPONIBLE:
             cv.create_oval(px - 5, py - 5, px + 5, py + 5, outline=TEXTO_OSCURO,
                            width=2, tags="hov")
             cv.create_text(px, py - 12, text=f"{txt_et} · {val}", anchor="s",
-                           fill=TEXTO_OSCURO, font=("Segoe UI", 8, "bold"),
+                           fill=TEXTO_OSCURO, font=(FUENTE_SISTEMA, 8, "bold"),
                            tags="hov")
 
         # ---------- PAGINA: REGISTRO ----------
@@ -9083,7 +9143,7 @@ if TK_DISPONIBLE:
                 y = self.winfo_rooty() + self.winfo_height() - 110
                 tw.wm_geometry(f"+{max(x, 10)}+{max(y, 10)}")
                 tk.Label(tw, text=msg, bg=VERDE_OK, fg=TEXTO_CLARO,
-                         font=("Segoe UI", 10, "bold"), padx=14, pady=8
+                         font=(FUENTE_SISTEMA, 10, "bold"), padx=14, pady=8
                          ).pack()
                 tw.after(ms, tw.destroy)
             except Exception:
@@ -9107,10 +9167,10 @@ if TK_DISPONIBLE:
             _badge = tk.Frame(self.reg_frame, bg=AZUL)
             _badge.grid(row=0, column=0, sticky="w", padx=30, pady=(14, 2))
             tk.Label(_badge, text="PASO 1 DE 2 · IDENTIDAD", bg=AZUL, fg=TEXTO_CLARO,
-                     font=("Segoe UI", 10, "bold"), padx=10, pady=4).pack()
+                     font=(FUENTE_SISTEMA, 10, "bold"), padx=10, pady=4).pack()
             tk.Label(self.reg_frame,
                      text="Apellido paterno, materno, nombre(s) y fecha. Enter avanza; en el ultimo campo guarda.",
-                     font=("Segoe UI", 10), bg=CREMA_CLARO, fg=GRIS_TEXTO
+                     font=(FUENTE_SISTEMA, 10), bg=CREMA_CLARO, fg=GRIS_TEXTO
                      ).grid(row=1, column=0, pady=(0, 8))
             campos = tk.Frame(self.reg_frame, bg=CREMA_CLARO)
             campos.grid(row=2, column=0, sticky="we", padx=30)
@@ -9124,9 +9184,9 @@ if TK_DISPONIBLE:
             self._paso1_entries = {}
             for i, (lab, key, upper) in enumerate(filas):
                 tk.Label(campos, text=lab, anchor="w", bg=CREMA_CLARO, fg=TEXTO_OSCURO,
-                         font=("Segoe UI", 11)).grid(row=i, column=0, sticky="w",
+                         font=(FUENTE_SISTEMA, 11)).grid(row=i, column=0, sticky="w",
                                                      pady=5, padx=(0, 10))
-                e = tk.Entry(campos, textvariable=self.reg_vars[key], font=("Segoe UI", 12),
+                e = tk.Entry(campos, textvariable=self.reg_vars[key], font=(FUENTE_SISTEMA, 12),
                              bg=BLANCO, fg=TEXTO_OSCURO, relief="solid", bd=1)
                 e.grid(row=i, column=1, sticky="we", pady=5)
                 self.reg_entries.append(e)
@@ -9147,10 +9207,10 @@ if TK_DISPONIBLE:
                             "CURP", msg)
                     tk.Button(campos, text="Validar", command=_validar_curp_ui,
                               bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                              font=("Segoe UI", 9)).grid(row=i, column=2, padx=(6, 0))
+                              font=(FUENTE_SISTEMA, 9)).grid(row=i, column=2, padx=(6, 0))
             # Indicador en vivo: ya puedes registrar / homonima detectada (ADR-0041)
             self.lbl_reg_listo = tk.Label(self.reg_frame, text="",
-                                          font=("Segoe UI", 10, "bold"),
+                                          font=(FUENTE_SISTEMA, 10, "bold"),
                                           bg=CREMA_CLARO, anchor="w")
             self.lbl_reg_listo.grid(row=3, column=0, sticky="w", padx=30, pady=(2, 0))
             for k in ("ap_p", "ap_m", "nombres", "fecha"):
@@ -9162,7 +9222,7 @@ if TK_DISPONIBLE:
             tk.Label(marco_sv,
                      text="Signos vitales y medidas (opcional) — se guardan como primer control "
                           "y alimentan las calculadoras",
-                     font=("Segoe UI", 10, "bold"), bg=CREMA_CLARO, fg=AZUL,
+                     font=(FUENTE_SISTEMA, 10, "bold"), bg=CREMA_CLARO, fg=AZUL,
                      anchor="w").grid(row=0, column=0, columnspan=8, sticky="w", pady=(0, 4))
             sv_filas = [("Peso (kg)", "peso", 8), ("Talla (cm)", "talla", 8),
                         ("TA sist.", "ta_s", 6), ("TA diast.", "ta_d", 6),
@@ -9176,10 +9236,10 @@ if TK_DISPONIBLE:
                 r = 1 + idx // 4
                 c = (idx % 4) * 2
                 tk.Label(marco_sv, text=lab, anchor="w", bg=CREMA_CLARO,
-                         fg=TEXTO_OSCURO, font=("Segoe UI", 9)).grid(
+                         fg=TEXTO_OSCURO, font=(FUENTE_SISTEMA, 9)).grid(
                     row=r, column=c, sticky="w", pady=2, padx=(0, 3))
                 e = tk.Entry(marco_sv, textvariable=self.reg_vars[key],
-                             font=("Segoe UI", 10), bg=BLANCO, width=w)
+                             font=(FUENTE_SISTEMA, 10), bg=BLANCO, width=w)
                 e.grid(row=r, column=c + 1, sticky="w", pady=2, padx=(0, 10))
                 self._sv_entries[key] = e
 
@@ -9187,11 +9247,11 @@ if TK_DISPONIBLE:
             btns.grid(row=5, column=0, sticky="we", padx=30, pady=16)
             tk.Button(btns, text="Guardar y crear expediente", command=self._guardar_paso1,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                      font=("Segoe UI", 11, "bold"), padx=12, pady=6
+                      font=(FUENTE_SISTEMA, 11, "bold"), padx=12, pady=6
                       ).pack(side="right", padx=6)
             tk.Button(btns, text="Cancelar", command=lambda: self.show_page("home"),
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                      font=("Segoe UI", 10), padx=12, pady=6).pack(side="right")
+                      font=(FUENTE_SISTEMA, 10), padx=12, pady=6).pack(side="right")
 
         def _reglas_registro_vivo(self, *args):
             """ADR-0041: confirmacion en vivo de que ya se puede registrar + homonima."""
@@ -9342,11 +9402,11 @@ if TK_DISPONIBLE:
             _badge2 = tk.Frame(self.reg_frame, bg=ACENTO)
             _badge2.grid(row=0, column=0, sticky="w", padx=30, pady=(14, 2))
             tk.Label(_badge2, text="PASO 2 DE 2 · DATOS ADICIONALES (OPCIONAL)",
-                     bg=ACENTO, fg=NAV_BG, font=("Segoe UI", 10, "bold"),
+                     bg=ACENTO, fg=NAV_BG, font=(FUENTE_SISTEMA, 10, "bold"),
                      padx=10, pady=4).pack()
             tk.Label(self.reg_frame,
                      text="Puedes omitirlos: se completan despues desde la Ficha de la paciente.",
-                     font=("Segoe UI", 10), bg=CREMA_CLARO, fg=GRIS_TEXTO
+                     font=(FUENTE_SISTEMA, 10), bg=CREMA_CLARO, fg=GRIS_TEXTO
                      ).grid(row=1, column=0, sticky="w", padx=30, pady=(0, 8))
             campos = tk.Frame(self.reg_frame, bg=CREMA_CLARO)
             campos.grid(row=2, column=0, sticky="we", padx=30)
@@ -9356,9 +9416,9 @@ if TK_DISPONIBLE:
             self.reg_entries2 = []
             for i, (lab, key) in enumerate(filas):
                 tk.Label(campos, text=lab, anchor="w", bg=CREMA_CLARO, fg=TEXTO_OSCURO,
-                         font=("Segoe UI", 11)).grid(row=i, column=0, sticky="w",
+                         font=(FUENTE_SISTEMA, 11)).grid(row=i, column=0, sticky="w",
                                                      pady=5, padx=(0, 10))
-                e = tk.Entry(campos, textvariable=self.reg_vars[key], font=("Segoe UI", 12),
+                e = tk.Entry(campos, textvariable=self.reg_vars[key], font=(FUENTE_SISTEMA, 12),
                              bg=BLANCO, fg=TEXTO_OSCURO, relief="solid", bd=1)
                 e.grid(row=i, column=1, sticky="we", pady=5)
                 self.reg_entries2.append(e)
@@ -9371,11 +9431,11 @@ if TK_DISPONIBLE:
             btns.grid(row=3, column=0, sticky="we", padx=30, pady=16)
             tk.Button(btns, text="Guardar datos", command=self._guardar_paso2,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                      font=("Segoe UI", 11, "bold"), padx=12, pady=6
+                      font=(FUENTE_SISTEMA, 11, "bold"), padx=12, pady=6
                       ).pack(side="right", padx=6)
             tk.Button(btns, text="Omitir", command=self.ir_a_documentos,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                      font=("Segoe UI", 10), padx=12, pady=6).pack(side="right")
+                      font=(FUENTE_SISTEMA, 10), padx=12, pady=6).pack(side="right")
 
         def _enter_paso2(self, event):
             w = event.widget
@@ -9431,14 +9491,14 @@ if TK_DISPONIBLE:
                 return tk.Button(parent, text=texto, command=cmd, bg=BLANCO,
                                  fg=AZUL, activebackground=AZUL_CHIP, relief="flat",
                                  highlightthickness=1, highlightbackground=GRIS_BORDE,
-                                 font=("Segoe UI", 9), padx=8, pady=3, cursor="hand2")
+                                 font=(FUENTE_SISTEMA, 9), padx=8, pady=3, cursor="hand2")
 
             card_sel = tk.Frame(tab_pac, bg=BLANCO, highlightthickness=1,
                                 highlightbackground=GRIS_BORDE)
             card_sel.grid(row=0, column=0, columnspan=2, sticky="we",
                           padx=10, pady=(8, 2))
             self.lbl_sel = tk.Label(card_sel, text="Ninguna paciente seleccionada",
-                                    font=("Segoe UI", 12, "bold"), bg=BLANCO,
+                                    font=(FUENTE_SISTEMA, 12, "bold"), bg=BLANCO,
                                     fg=ROJO_AVISO, anchor="w", padx=10, pady=7)
             self.lbl_sel.pack(fill="x")
             # fila del episodio en 2 lineas: sin desbordar a ~1050 px
@@ -9448,9 +9508,9 @@ if TK_DISPONIBLE:
             sup_epis = tk.Frame(fila_epis, bg=CREMA_CLARO)
             sup_epis.pack(fill="x")
             tk.Label(sup_epis, text="Episodio (embarazo):", bg=CREMA_CLARO,
-                     fg=TEXTO_OSCURO, font=("Segoe UI", 10)).pack(side="left")
+                     fg=TEXTO_OSCURO, font=(FUENTE_SISTEMA, 10)).pack(side="left")
             self.epi_combo = ttk.Combobox(sup_epis, state="readonly", width=26,
-                                          font=("Segoe UI", 10))
+                                          font=(FUENTE_SISTEMA, 10))
             self.epi_combo.pack(side="left", padx=6)
             self.epi_combo.bind("<<ComboboxSelected>>", self._cambiar_episodio)
             _btn_epi(sup_epis, "+ Nuevo embarazo",
@@ -9476,7 +9536,7 @@ if TK_DISPONIBLE:
             banda_tira.pack(fill="x", pady=(5, 0))
             self.lbl_tira = tk.Label(banda_tira, text="FUM: -  |  FPP: -  |  EG: -",
                                      bg=AZUL_CHIP, fg=AZUL,
-                                     font=("Segoe UI", FUENTE_M, "bold"),
+                                     font=(FUENTE_SISTEMA, FUENTE_M, "bold"),
                                      anchor="w", justify="left", padx=8, pady=5)
             self.lbl_tira.pack(fill="x")
             # U131 (v4.17): selector plegable de pacientes (col0)
@@ -9487,14 +9547,14 @@ if TK_DISPONIBLE:
                 fila_cambio, text="▸ Elegir paciente",
                 command=self._alternar_selector_docs, bg=BLANCO, fg=AZUL,
                 activebackground=AZUL_CHIP, relief="flat", highlightthickness=1,
-                highlightbackground=GRIS_BORDE, font=("Segoe UI", 9, "bold"),
+                highlightbackground=GRIS_BORDE, font=(FUENTE_SISTEMA, 9, "bold"),
                 padx=10, pady=3, cursor="hand2")
             self.docs_sel_btn.pack(side="left")
             Tooltip(self.docs_sel_btn,
                     "Muestra u oculta los recientes y la busqueda interna")
             self.docs_sel_pista = tk.Label(
                 fila_cambio, text="", bg=CREMA_CLARO, fg=GRIS_TERCIARIO,
-                font=("Segoe UI", 9), anchor="e")
+                font=(FUENTE_SISTEMA, 9), anchor="e")
             self.docs_sel_pista.pack(side="right", fill="x", padx=(10, 0))
             self.docs_sel_frame = tk.Frame(tab_pac, bg=CREMA_CLARO)
             self.docs_sel_frame.grid(row=3, column=0, sticky="nsew",
@@ -9504,12 +9564,12 @@ if TK_DISPONIBLE:
             self.docs_sel_frame.grid_rowconfigure(4, weight=1)
             tk.Label(self.docs_sel_frame,
                      text="Pacientes recientes (clic = seleccionar, doble clic = Ficha):",
-                     bg=CREMA_CLARO, fg=TEXTO_OSCURO, font=("Segoe UI", 10),
+                     bg=CREMA_CLARO, fg=TEXTO_OSCURO, font=(FUENTE_SISTEMA, 10),
                      anchor="w").grid(row=0, column=0, sticky="we", pady=(2, 0))
             marco_rec = tk.Frame(self.docs_sel_frame, bg=BLANCO, highlightthickness=1,
                                  highlightbackground=GRIS_BORDE)
             marco_rec.grid(row=1, column=0, sticky="nsew", pady=3)
-            self.lb_recientes = tk.Listbox(marco_rec, height=4, font=("Segoe UI", 10),
+            self.lb_recientes = tk.Listbox(marco_rec, height=4, font=(FUENTE_SISTEMA, 10),
                                            bg=BLANCO, fg=TEXTO_OSCURO,
                                            selectbackground=AZUL,
                                            selectforeground=TEXTO_CLARO, activestyle="none")
@@ -9522,12 +9582,12 @@ if TK_DISPONIBLE:
             self.lb_recientes.bind("<Double-Button-1>", lambda e: self._ficha_reciente())
             tk.Label(self.docs_sel_frame,
                      text="O buscar otra paciente (nombre, CURP, telefono o correo):",
-                     bg=CREMA_CLARO, fg=TEXTO_OSCURO, font=("Segoe UI", 10),
+                     bg=CREMA_CLARO, fg=TEXTO_OSCURO, font=(FUENTE_SISTEMA, 10),
                      anchor="w").grid(row=2, column=0, sticky="we", pady=(6, 0))
             marco_busq = tk.Frame(self.docs_sel_frame, bg=CREMA_CLARO)
             marco_busq.grid(row=3, column=0, sticky="we", pady=3)
             marco_busq.grid_columnconfigure(0, weight=1)
-            self.entry_busq_docs = tk.Entry(marco_busq, font=("Segoe UI", 11),
+            self.entry_busq_docs = tk.Entry(marco_busq, font=(FUENTE_SISTEMA, 11),
                                             bg=BLANCO, fg=TEXTO_OSCURO,
                                             relief="solid", bd=1)
             self.entry_busq_docs.grid(row=0, column=0, sticky="we", padx=(0, 6))
@@ -9539,7 +9599,7 @@ if TK_DISPONIBLE:
             marco_res = tk.Frame(self.docs_sel_frame, bg=BLANCO, highlightthickness=1,
                                  highlightbackground=GRIS_BORDE)
             marco_res.grid(row=4, column=0, sticky="nsew", pady=3)
-            self.lb_busqueda = tk.Listbox(marco_res, height=3, font=("Segoe UI", 10),
+            self.lb_busqueda = tk.Listbox(marco_res, height=3, font=(FUENTE_SISTEMA, 10),
                                           bg=BLANCO, fg=TEXTO_OSCURO,
                                           selectbackground=AZUL,
                                           selectforeground=TEXTO_CLARO, activestyle="none")
@@ -9557,14 +9617,14 @@ if TK_DISPONIBLE:
             self.docs_tpl_marco.grid_rowconfigure(1, weight=1)
             self.docs_tpl_marco.grid_columnconfigure(0, weight=1)
             tk.Label(self.docs_tpl_marco, text="Plantilla:", bg=BLANCO, fg=TEXTO_OSCURO,
-                     font=("Segoe UI", 10, "bold"), anchor="w"
+                     font=(FUENTE_SISTEMA, 10, "bold"), anchor="w"
                      ).grid(row=0, column=0, sticky="we", padx=8, pady=(6, 2))
             marco_lb_tpl = tk.Frame(self.docs_tpl_marco, bg=BLANCO)
             marco_lb_tpl.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
             marco_lb_tpl.grid_columnconfigure(0, weight=1)
             marco_lb_tpl.grid_rowconfigure(0, weight=1)
             self.lb_plantillas = tk.Listbox(marco_lb_tpl, height=4,
-                                            font=("Segoe UI", 10),
+                                            font=(FUENTE_SISTEMA, 10),
                                             bg=BLANCO, fg=TEXTO_OSCURO,
                                             selectbackground=AZUL,
                                             selectforeground=TEXTO_CLARO, activestyle="none")
@@ -9579,7 +9639,7 @@ if TK_DISPONIBLE:
                           padx=10, pady=(8, 6))
             tk.Button(fila_acc, text="Generar y abrir documento",
                       command=self._generar_docs, bg=AZUL, fg=TEXTO_CLARO,
-                      activebackground=AZUL_HOVER, font=("Segoe UI", 11, "bold"),
+                      activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 11, "bold"),
                       padx=10, pady=6).pack(side="left", padx=4)
             tips_docs = {
                 "Progreso Quimico": "Archivo vivo del episodio; se grafica en Graficos",
@@ -9595,7 +9655,7 @@ if TK_DISPONIBLE:
                     ("Historia (NOM-004)", self._dlg_nom004)]:
                 bb = tk.Button(fila_acc, text=txt, command=cmd, bg=GRIS_SECUNDARIO,
                                fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
-                               font=("Segoe UI", 10), padx=10, pady=6)
+                               font=(FUENTE_SISTEMA, 10), padx=10, pady=6)
                 bb.pack(side="left", padx=4)
                 if txt in tips_docs:
                     Tooltip(bb, tips_docs[txt])
@@ -9604,30 +9664,30 @@ if TK_DISPONIBLE:
             tab_sin.grid_columnconfigure(0, weight=1)
             tab_sin.grid_rowconfigure(3, weight=1)
             tk.Label(tab_sin, text="Nombre del documento:", bg=CREMA_CLARO,
-                     fg=TEXTO_OSCURO, font=("Segoe UI", 11), anchor="w"
+                     fg=TEXTO_OSCURO, font=(FUENTE_SISTEMA, 11), anchor="w"
                      ).grid(row=0, column=0, sticky="we", padx=12, pady=(12, 2))
             self.doc_sin_var = tk.StringVar()
-            tk.Entry(tab_sin, textvariable=self.doc_sin_var, font=("Segoe UI", 11),
+            tk.Entry(tab_sin, textvariable=self.doc_sin_var, font=(FUENTE_SISTEMA, 11),
                      bg=BLANCO, relief="solid", bd=1).grid(row=1, column=0,
                                                            sticky="we", padx=12, pady=3)
             tk.Label(tab_sin, text="Plantilla:", bg=CREMA_CLARO, fg=TEXTO_OSCURO,
-                     font=("Segoe UI", 11), anchor="w").grid(row=2, column=0,
+                     font=(FUENTE_SISTEMA, 11), anchor="w").grid(row=2, column=0,
                                                              sticky="we", padx=12, pady=(8, 2))
-            self.lb_plantillas_sin = tk.Listbox(tab_sin, height=6, font=("Segoe UI", 10),
+            self.lb_plantillas_sin = tk.Listbox(tab_sin, height=6, font=(FUENTE_SISTEMA, 10),
                                                 bg=BLANCO, fg=TEXTO_OSCURO,
                                                 selectbackground=AZUL,
                                                 selectforeground=TEXTO_CLARO)
             self.lb_plantillas_sin.grid(row=3, column=0, sticky="nsew", padx=12, pady=3)
             tk.Button(tab_sin, text="Generar documento general",
                       command=self._generar_sin_paciente, bg=AZUL, fg=TEXTO_CLARO,
-                      activebackground=AZUL_HOVER, font=("Segoe UI", 11),
+                      activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 11),
                       pady=6).grid(row=4, column=0, pady=12)
 
             # -- Plantillas (edicion solo .txt) --
             tab_tpl.grid_columnconfigure(0, weight=1)
             tab_tpl.grid_rowconfigure(2, weight=1)
             tk.Label(tab_tpl, text="Gestionar plantillas",
-                     font=("Segoe UI", 14, "bold"), bg=CREMA_CLARO,
+                     font=(FUENTE_SISTEMA, 14, "bold"), bg=CREMA_CLARO,
                      fg=TEXTO_OSCURO).grid(row=0, column=0, pady=10)
             fila_c = tk.Frame(tab_tpl, bg=CREMA_CLARO)
             fila_c.grid(row=1, column=0, sticky="we", padx=12, pady=4)
@@ -9635,14 +9695,14 @@ if TK_DISPONIBLE:
             tk.Label(fila_c, text="Plantilla:", bg=CREMA_CLARO, fg=TEXTO_OSCURO
                      ).grid(row=0, column=0, padx=(0, 6))
             self.tpl_combo = ttk.Combobox(fila_c, state="readonly",
-                                          font=("Segoe UI", 10))
+                                          font=(FUENTE_SISTEMA, 10))
             self.tpl_combo.grid(row=0, column=1, sticky="we")
             self.tpl_combo.bind("<<ComboboxSelected>>",
                                 lambda e: self._refrescar_tipo_tpl())
             # U132 (v4.17): indicador de tipo junto al combo
             self.docs_tpl_tipo = tk.Label(fila_c, text="", bg=CREMA_CLARO,
                                           fg=GRIS_TERCIARIO,
-                                          font=("Segoe UI", 9))
+                                          font=(FUENTE_SISTEMA, 9))
             self.docs_tpl_tipo.grid(row=0, column=2, padx=(8, 0))
             self.tpl_text = tk.Text(tab_tpl, font=("Consolas", 10), bg=BLANCO,
                                     fg=TEXTO_OSCURO, relief="solid", bd=1)
@@ -9655,11 +9715,11 @@ if TK_DISPONIBLE:
                              ("Nueva plantilla (.txt)", self._nueva_plantilla),
                              ("Recargar lista", self._recargar_tpls)]:
                 tk.Button(fila_b, text=txt, command=cmd, bg=AZUL, fg=TEXTO_CLARO,
-                          activebackground=AZUL_HOVER, font=("Segoe UI", 9),
+                          activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 9),
                           padx=8, pady=4).pack(side="left", padx=4)
             tk.Label(tab_tpl,
                      text="Solo .txt se edita aqui. .docx/.xlsx se abren con Word/Excel (boton Abrir) para no corromperlos.",
-                     bg=CREMA_CLARO, fg=GRIS_TERCIARIO, font=("Segoe UI", 9)
+                     bg=CREMA_CLARO, fg=GRIS_TERCIARIO, font=(FUENTE_SISTEMA, 9)
                      ).grid(row=4, column=0, sticky="w", padx=12, pady=4)
 
             self.refrescar_recientes()
@@ -9797,10 +9857,10 @@ if TK_DISPONIBLE:
             marco = tk.Frame(win, bg=CREMA_CLARO, padx=16, pady=16)
             marco.pack(fill="both", expand=True, padx=10, pady=10)
             tk.Label(marco, text="Nuevo embarazo / episodio",
-                     font=("Segoe UI", 14, "bold"), bg=CREMA_CLARO,
+                     font=(FUENTE_SISTEMA, 14, "bold"), bg=CREMA_CLARO,
                      fg=TEXTO_OSCURO).pack(anchor="w")
             tk.Label(marco, text=f"Paciente: {nombre_mostrar(self.ruta_activa)}",
-                     font=("Segoe UI", 10, "bold"), bg=CREMA_CLARO, fg=AZUL
+                     font=(FUENTE_SISTEMA, 10, "bold"), bg=CREMA_CLARO, fg=AZUL
                      ).pack(anchor="w", pady=(2, 0))
             tk.Label(marco, text="Elige la fecha del parto (si ya ocurrio) o la fecha de "
                                  "registro del embarazo actual. La FUM nace con hoy; "
@@ -9812,9 +9872,9 @@ if TK_DISPONIBLE:
                 fila = tk.Frame(marco, bg=CREMA_CLARO)
                 fila.pack(fill="x", pady=4)
                 tk.Label(fila, text=texto_label, bg=CREMA_CLARO, fg=TEXTO_OSCURO,
-                         font=("Segoe UI", 11)).pack(side="left")
+                         font=(FUENTE_SISTEMA, 11)).pack(side="left")
                 var = tk.StringVar()
-                e = tk.Entry(fila, textvariable=var, font=("Segoe UI", 12), width=14,
+                e = tk.Entry(fila, textvariable=var, font=(FUENTE_SISTEMA, 12), width=14,
                              bg=BLANCO, justify="center")
                 e.pack(side="left", padx=8)
                 return e, var
@@ -9875,7 +9935,7 @@ if TK_DISPONIBLE:
             pie.pack(fill="x", pady=(14, 0))
             tk.Button(pie, text="Crear episodio", command=_crear, bg=AZUL,
                       fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                      font=("Segoe UI", 11, "bold"), padx=10, pady=6
+                      font=(FUENTE_SISTEMA, 11, "bold"), padx=10, pady=6
                       ).pack(side="right", padx=4)
             tk.Button(pie, text="Cancelar", command=win.destroy, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
@@ -9913,14 +9973,14 @@ if TK_DISPONIBLE:
             marco = tk.Frame(win, bg=CREMA_CLARO, padx=14, pady=12)
             marco.pack(fill="both", expand=True)
             tk.Label(marco, text="Dictado de voz para la historia clinica",
-                     font=("Segoe UI", 12, "bold"), bg=CREMA_CLARO, fg=AZUL
+                     font=(FUENTE_SISTEMA, 12, "bold"), bg=CREMA_CLARO, fg=AZUL
                      ).pack(anchor="w")
             if ok:
                 tk.Label(marco, text="Motor Vosk disponible. Usa el dictado del SO "
                                      "(Win+H / fn fn) en el campo que quieras, o "
                                      "instala sounddevice para dictado por micrófono.",
                          bg=CREMA_CLARO, fg=VERDE_OK, wraplength=400,
-                         justify="left", font=("Segoe UI", 10)).pack(anchor="w", pady=6)
+                         justify="left", font=(FUENTE_SISTEMA, 10)).pack(anchor="w", pady=6)
             else:
                 tk.Label(marco, text=f"Dictado disponible:\n{msg}\n\n"
                                      "En Windows: presiona Win+H y dicta.\n"
@@ -9929,7 +9989,7 @@ if TK_DISPONIBLE:
                                      "Para dictado por micrófono sin conexión,\n"
                                      "instala Vosk: pip install vosk",
                          bg=CREMA_CLARO, fg=TEXTO_OSCURO, wraplength=400,
-                         justify="left", font=("Segoe UI", 10)).pack(anchor="w", pady=6)
+                         justify="left", font=(FUENTE_SISTEMA, 10)).pack(anchor="w", pady=6)
             tk.Button(marco, text="Cerrar", command=win.destroy, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO, padx=10, pady=6
                       ).pack(anchor="e", pady=8)
@@ -9966,7 +10026,7 @@ if TK_DISPONIBLE:
             marco = tk.Frame(win, bg=CREMA_CLARO, padx=16, pady=16)
             marco.pack(fill="both", expand=True, padx=10, pady=10)
             tk.Label(marco, text=f"Datos del embarazo - Episodio {eid}",
-                     font=("Segoe UI", 14, "bold"), bg=CREMA_CLARO,
+                     font=(FUENTE_SISTEMA, 14, "bold"), bg=CREMA_CLARO,
                      fg=TEXTO_OSCURO).pack(anchor="w")
             tk.Label(marco, text="Edicion posterior: FUM y fecha de referencia "
                                  "(parto/registro). Pulsa Guardar para aplicar cambios.",
@@ -9977,9 +10037,9 @@ if TK_DISPONIBLE:
                 fila = tk.Frame(marco, bg=CREMA_CLARO)
                 fila.pack(fill="x", pady=4)
                 tk.Label(fila, text=texto_label, bg=CREMA_CLARO, fg=TEXTO_OSCURO,
-                         font=("Segoe UI", 11)).pack(side="left")
+                         font=(FUENTE_SISTEMA, 11)).pack(side="left")
                 var = tk.StringVar(value=valor or "")
-                e = tk.Entry(fila, textvariable=var, font=("Segoe UI", 12), width=14,
+                e = tk.Entry(fila, textvariable=var, font=(FUENTE_SISTEMA, 12), width=14,
                              bg=BLANCO, justify="center")
                 e.pack(side="left", padx=8)
                 return e, var
@@ -10005,12 +10065,12 @@ if TK_DISPONIBLE:
             fila_tp = tk.Frame(marco, bg=CREMA_CLARO)
             fila_tp.pack(fill="x", pady=4)
             tk.Label(fila_tp, text="Tipo parto anterior:", bg=CREMA_CLARO,
-                     fg=TEXTO_OSCURO, font=("Segoe UI", 11)).pack(side="left")
+                     fg=TEXTO_OSCURO, font=(FUENTE_SISTEMA, 11)).pack(side="left")
             var_tp = tk.StringVar(value=epi.get("tipo_parto_anterior", ""))
             ttk.Combobox(fila_tp, textvariable=var_tp, width=16,
                          values=("Espontaneo", "Cesarea", "Instrumentado",
                                  "Multiple", "No aplica"),
-                         font=("Segoe UI", 11)).pack(side="left", padx=8)
+                         font=(FUENTE_SISTEMA, 11)).pack(side="left", padx=8)
             e_comp, var_comp = _campo("Complicaciones previas:",
                                       epi.get("complicaciones_previas", ""))
             e_fpa, var_fpa = _campo("Fecha parto anterior (opcional):",
@@ -10093,7 +10153,7 @@ if TK_DISPONIBLE:
             pie.pack(fill="x", pady=(14, 0))
             tk.Button(pie, text="Guardar", command=_guardar, bg=AZUL,
                       fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                      font=("Segoe UI", 11, "bold"), padx=10, pady=6
+                      font=(FUENTE_SISTEMA, 11, "bold"), padx=10, pady=6
                       ).pack(side="right", padx=4)
             tk.Button(pie, text="Limpiar FUM", command=_limpiar_fum, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
@@ -10255,12 +10315,12 @@ if TK_DISPONIBLE:
             marco = tk.Frame(win, bg=CREMA_CLARO, padx=16, pady=14)
             marco.pack(fill="both", expand=True, padx=10, pady=10)
             tk.Label(marco, text="Nueva plantilla de texto",
-                     font=("Segoe UI", 13, "bold"), bg=CREMA_CLARO,
+                     font=(FUENTE_SISTEMA, 13, "bold"), bg=CREMA_CLARO,
                      fg=TEXTO_OSCURO).pack(anchor="w")
             tk.Label(marco, text="Nombre (se guardara como .txt en _PLANTILLAS):",
                      bg=CREMA_CLARO, fg=GRIS_TEXTO).pack(anchor="w", pady=(6, 2))
             var = tk.StringVar(value="PLANTILLA_NUEVA.txt")
-            e = tk.Entry(marco, textvariable=var, font=("Segoe UI", 12), bg=BLANCO)
+            e = tk.Entry(marco, textvariable=var, font=(FUENTE_SISTEMA, 12), bg=BLANCO)
             e.pack(fill="x")
             e.select_range(0, "end")
             e.focus_set()
@@ -10300,7 +10360,7 @@ if TK_DISPONIBLE:
             fila = tk.Frame(marco, bg=CREMA_CLARO)
             fila.pack(fill="x", pady=(12, 0))
             tk.Button(fila, text="Crear", command=crear, bg=AZUL, fg=TEXTO_CLARO,
-                      activebackground=AZUL_HOVER, font=("Segoe UI", 11, "bold"),
+                      activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 11, "bold"),
                       padx=10, pady=5).pack(side="right", padx=4)
             tk.Button(fila, text="Cancelar", command=win.destroy, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
@@ -10321,22 +10381,22 @@ if TK_DISPONIBLE:
             marco = tk.Frame(win, bg=CREMA_CLARO, padx=16, pady=16)
             marco.pack(fill="both", expand=True, padx=10, pady=10)
             tk.Label(marco, text="Consentimiento informado",
-                     font=("Segoe UI", 14, "bold"), bg=CREMA_CLARO,
+                     font=(FUENTE_SISTEMA, 14, "bold"), bg=CREMA_CLARO,
                      fg=TEXTO_OSCURO).pack(anchor="w")
             _epi_c11 = (self.datos_activos or {}).get("episodio_activo", "")
             tk.Label(marco,
                      text=f"Paciente: {nombre_mostrar(self.ruta_activa)}"
                           + (f"   ·   Episodio: {_epi_c11}" if _epi_c11 else ""),
-                     bg=CREMA_CLARO, fg=AZUL, font=("Segoe UI", 10, "bold"),
+                     bg=CREMA_CLARO, fg=AZUL, font=(FUENTE_SISTEMA, 10, "bold"),
                      wraplength=500, justify="left").pack(anchor="w", pady=4)
             tk.Label(marco, text="Procedimiento / acto clinico:",
                      bg=CREMA_CLARO, fg=TEXTO_OSCURO).pack(anchor="w", pady=(8, 2))
-            e = tk.Entry(marco, font=("Segoe UI", 12), bg=BLANCO, width=60)
+            e = tk.Entry(marco, font=(FUENTE_SISTEMA, 12), bg=BLANCO, width=60)
             e.pack(anchor="w", fill="x")
             e.focus_set()
             tk.Label(marco, text="Se generara un .txt en el episodio activo con tu firma "
                                  "y hash de integridad.",
-                     bg=CREMA_CLARO, fg=GRIS_TERCIARIO, font=("Segoe UI", 9)
+                     bg=CREMA_CLARO, fg=GRIS_TERCIARIO, font=(FUENTE_SISTEMA, 9)
                      ).pack(anchor="w", pady=6)
 
             def generar():
@@ -10351,7 +10411,7 @@ if TK_DISPONIBLE:
 
             tk.Button(marco, text="Generar consentimiento", command=generar,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                      font=("Segoe UI", 11, "bold"), pady=6).pack(anchor="e", pady=10)
+                      font=(FUENTE_SISTEMA, 11, "bold"), pady=6).pack(anchor="e", pady=10)
             e.bind("<Return>", lambda ev: generar())
             auto_tamano(win, self)
 
@@ -10365,13 +10425,13 @@ if TK_DISPONIBLE:
             marco = tk.Frame(win, bg=CREMA_CLARO, padx=14, pady=14)
             marco.pack(fill="both", expand=True)
             tk.Label(marco, text="Historia clinica - NOM-004-SSA3-2012",
-                     font=("Segoe UI", 14, "bold"), bg=CREMA_CLARO,
+                     font=(FUENTE_SISTEMA, 14, "bold"), bg=CREMA_CLARO,
                      fg=TEXTO_OSCURO).grid(row=0, column=0, columnspan=2, sticky="w")
             _epi_c12 = (self.datos_activos or {}).get("episodio_activo", "")
             tk.Label(marco,
                      text=f"Paciente: {nombre_mostrar(self.ruta_activa)}"
                           + (f"   ·   Episodio: {_epi_c12}" if _epi_c12 else ""),
-                     bg=CREMA_CLARO, fg=AZUL, font=("Segoe UI", 10, "bold")
+                     bg=CREMA_CLARO, fg=AZUL, font=(FUENTE_SISTEMA, 10, "bold")
                      ).grid(row=1, column=0, columnspan=2, sticky="w", pady=4)
             campos = {}
             # Documentos del episodio (ADR-0028/T14)
@@ -10381,7 +10441,7 @@ if TK_DISPONIBLE:
                      f"{len(docs_ep['consentimientos'])} consentimiento(s) · "
                      f"Progreso Quimico {'si' if docs_ep['progreso'] else 'no'}")
             tk.Label(marco, text=_hays, bg=CREMA_CLARO, fg=GRIS_TEXTO,
-                     font=("Segoe UI", 9), anchor="w"
+                     font=(FUENTE_SISTEMA, 9), anchor="w"
                      ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 4))
             etiquetas = [
                 ("heredofamiliares", "2. Antecedentes heredofamiliares"),
@@ -10396,9 +10456,9 @@ if TK_DISPONIBLE:
             for i, (key, lab) in enumerate(etiquetas):
                 fila = 3 + i
                 tk.Label(marco, text=lab, bg=CREMA_CLARO, fg=TEXTO_OSCURO,
-                         font=("Segoe UI", 10), anchor="w"
+                         font=(FUENTE_SISTEMA, 10), anchor="w"
                          ).grid(row=fila, column=0, sticky="nw", pady=3, padx=(0, 8))
-                t = tk.Text(marco, height=2, width=64, font=("Segoe UI", 10),
+                t = tk.Text(marco, height=2, width=64, font=(FUENTE_SISTEMA, 10),
                             bg=BLANCO, relief="solid", bd=1)
                 t.grid(row=fila, column=1, sticky="we", pady=3)
                 campos[key] = t
@@ -10419,7 +10479,7 @@ if TK_DISPONIBLE:
                 caja = tk.Frame(vw, bg=CREMA_CLARO, padx=10, pady=8)
                 caja.pack(fill="both", expand=True)
                 tk.Label(caja, text="Vista previa (aun NO guardada)",
-                         font=("Segoe UI", 11, "bold"), bg=CREMA_CLARO,
+                         font=(FUENTE_SISTEMA, 11, "bold"), bg=CREMA_CLARO,
                          fg=AZUL).pack(anchor="w")
                 txt = tk.Text(caja, width=84, height=24, font=("Courier", 10),
                               bg=BLANCO, relief="solid", bd=1, wrap="none")
@@ -10458,19 +10518,19 @@ if TK_DISPONIBLE:
             # ADR-0040: dictado de voz para campos narrativos
             tk.Button(fila_btns, text="Dictar (voz)", command=lambda: self._dictar(),
                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO,
-                      activebackground=GRIS_APAGADO, font=("Segoe UI", 9),
+                      activebackground=GRIS_APAGADO, font=(FUENTE_SISTEMA, 9),
                       padx=8, pady=6).pack(side="left", padx=4)
             tk.Button(fila_btns, text="Vista previa", command=vista_previa,
                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO,
-                      activebackground=GRIS_APAGADO, font=("Segoe UI", 10),
+                      activebackground=GRIS_APAGADO, font=(FUENTE_SISTEMA, 10),
                       padx=10, pady=6).pack(side="left", padx=4)
             tk.Button(fila_btns, text="Abrir ultima historia", command=abrir_ultima,
                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO,
-                      activebackground=GRIS_APAGADO, font=("Segoe UI", 10),
+                      activebackground=GRIS_APAGADO, font=(FUENTE_SISTEMA, 10),
                       padx=10, pady=6).pack(side="left", padx=4)
             tk.Button(fila_btns, text="Generar historia clinica", command=generar,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                      font=("Segoe UI", 11, "bold"), pady=6
+                      font=(FUENTE_SISTEMA, 11, "bold"), pady=6
                       ).pack(side="right", padx=4)
             auto_tamano(win, self)
 
@@ -10487,7 +10547,7 @@ if TK_DISPONIBLE:
             self.lbl_admin_sel = tk.Label(
                 ctx_admin,
                 text="Ninguna paciente seleccionada (selecciona en Inicio o Documentos)",
-                font=("Segoe UI", 11, "bold"), bg=BLANCO, fg=ROJO_AVISO,
+                font=(FUENTE_SISTEMA, 11, "bold"), bg=BLANCO, fg=ROJO_AVISO,
                 anchor="w", padx=10, pady=7)
             self.lbl_admin_sel.pack(fill="x")
             cuerpo = tk.Frame(admin, bg=CREMA_CLARO)
@@ -10527,12 +10587,12 @@ if TK_DISPONIBLE:
             ]
             for col, txt, cmd in botones:
                 tk.Button(col, text=txt, command=cmd, bg=AZUL, fg=TEXTO_CLARO,
-                          activebackground=AZUL_HOVER, font=("Segoe UI", 10),
+                          activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 10),
                           anchor="w", padx=12, pady=6).pack(fill="x", pady=3)
             tk.Label(admin,
                      text="Soporte normativo (consentimiento, bitacora, NOM-004, aviso de "
                           "privacidad), no certificacion oficial. Datos 100% locales.",
-                     bg=CREMA_CLARO, fg=GRIS_TERCIARIO, font=("Segoe UI", 9),
+                     bg=CREMA_CLARO, fg=GRIS_TERCIARIO, font=(FUENTE_SISTEMA, 9),
                      wraplength=700, justify="left").grid(row=2, column=0,
                                                           sticky="w", padx=16, pady=(4, 10))
             admin.grid_remove()
@@ -10575,7 +10635,7 @@ if TK_DISPONIBLE:
                                  "consentimientos y documentos:",
                      bg=CREMA_CLARO, fg=TEXTO_OSCURO, wraplength=340,
                      justify="left").pack(anchor="w")
-            e = tk.Entry(marco, font=("Segoe UI", 12), bg=BLANCO)
+            e = tk.Entry(marco, font=(FUENTE_SISTEMA, 12), bg=BLANCO)
             e.insert(0, autor_actual())
             e.pack(fill="x", pady=8)
 
@@ -10638,29 +10698,29 @@ if TK_DISPONIBLE:
             marco = tk.Frame(win, bg=CREMA_CLARO, padx=14, pady=12)
             marco.pack(fill="both", expand=True)
             tk.Label(marco, text="Exportar historial anonimizado (C-21)",
-                     font=("Segoe UI", 13, "bold"), bg=CREMA_CLARO, fg=AZUL
+                     font=(FUENTE_SISTEMA, 13, "bold"), bg=CREMA_CLARO, fg=AZUL
                      ).pack(anchor="w")
             # tabla retira/conserva
             tabla = tk.Frame(marco, bg=BLANCO, highlightthickness=1,
                              highlightbackground=GRIS_BORDE)
             tabla.pack(fill="x", pady=6)
             tk.Label(tabla, text="SE RETIRA", bg="#F8C9C4", fg=ROJO_AVISO,
-                     font=("Segoe UI", 9, "bold"), padx=6, pady=3).grid(row=0, column=0, sticky="w")
+                     font=(FUENTE_SISTEMA, 9, "bold"), padx=6, pady=3).grid(row=0, column=0, sticky="w")
             tk.Label(tabla, text="SE CONSERVA", bg="#DFF3E4", fg=VERDE_OK,
-                     font=("Segoe UI", 9, "bold"), padx=6, pady=3).grid(row=0, column=1, sticky="w")
+                     font=(FUENTE_SISTEMA, 9, "bold"), padx=6, pady=3).grid(row=0, column=1, sticky="w")
             retira = "nombre, CURP, clave, telefono, correo,\ndomicilio, NSS, fecha nacimiento,\nacompanante, cedula, testigos,\nnombres de medicos"
             conserva = "edad, sexo, ocupacion,\nescolaridad, estado civil, religion,\nsecciones A-M, serie de controles,\nlaboratorio, alergias, grupo,\nG-P-A, FUM/FPP/EG, alertas"
             tk.Label(tabla, text=retira, bg=BLANCO, fg=TEXTO_OSCURO,
-                     font=("Segoe UI", 9), justify="left", padx=6, pady=4
+                     font=(FUENTE_SISTEMA, 9), justify="left", padx=6, pady=4
                      ).grid(row=1, column=0, sticky="nw", padx=4, pady=4)
             tk.Label(tabla, text=conserva, bg=BLANCO, fg=TEXTO_OSCURO,
-                     font=("Segoe UI", 9), justify="left", padx=6, pady=4
+                     font=(FUENTE_SISTEMA, 9), justify="left", padx=6, pady=4
                      ).grid(row=1, column=1, sticky="nw", padx=4, pady=4)
             tabla.grid_columnconfigure(0, weight=1)
             tabla.grid_columnconfigure(1, weight=1)
             tk.Label(marco, text="Pregunta de analisis (opcional):", bg=CREMA_CLARO,
-                     fg=TEXTO_OSCURO, font=("Segoe UI", 10)).pack(anchor="w", pady=(6, 0))
-            e_preg = tk.Text(marco, height=2, width=60, font=("Segoe UI", 10),
+                     fg=TEXTO_OSCURO, font=(FUENTE_SISTEMA, 10)).pack(anchor="w", pady=(6, 0))
+            e_preg = tk.Text(marco, height=2, width=60, font=(FUENTE_SISTEMA, 10),
                              bg=BLANCO, relief="solid", bd=1)
             e_preg.insert("1.0", "Evaluar: alimentacion, rutina de vida, medicamentos, "
                                  "suplementos, ejercicio, aspectos criticos a vigilar.")
@@ -10670,7 +10730,7 @@ if TK_DISPONIBLE:
                            bg=CREMA_CLARO, fg=TEXTO_OSCURO, selectcolor=BLANCO
                            ).pack(anchor="w", pady=4)
             lbl_estado = tk.Label(marco, text="", bg=CREMA_CLARO, fg=GRIS_TEXTO,
-                                  font=("Segoe UI", 9), anchor="w", wraplength=500)
+                                  font=(FUENTE_SISTEMA, 9), anchor="w", wraplength=500)
             lbl_estado.pack(fill="x")
             def _generar():
                 preg = e_preg.get("1.0", "end").strip()
@@ -10692,7 +10752,7 @@ if TK_DISPONIBLE:
                       ).pack(side="right")
             tk.Button(pie, text="Generar export anonimizado", command=_generar,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                      font=("Segoe UI", 11, "bold"), padx=12, pady=6
+                      font=(FUENTE_SISTEMA, 11, "bold"), padx=12, pady=6
                       ).pack(side="right", padx=6)
             auto_tamano(win, self)
 
@@ -10716,10 +10776,10 @@ if TK_DISPONIBLE:
             marco = tk.Frame(win, bg=CREMA_CLARO, padx=14, pady=12)
             marco.pack(fill="both", expand=True)
             tk.Label(marco, text=f"CSV: {Path(ruta).name} ({len(encabezados)} columnas)",
-                     font=("Segoe UI", 11, "bold"), bg=CREMA_CLARO, fg=AZUL
+                     font=(FUENTE_SISTEMA, 11, "bold"), bg=CREMA_CLARO, fg=AZUL
                      ).pack(anchor="w")
             tk.Label(marco, text="Ajusta el mapeo si es necesario:",
-                     bg=CREMA_CLARO, fg=TEXTO_OSCURO, font=("Segoe UI", 10)
+                     bg=CREMA_CLARO, fg=TEXTO_OSCURO, font=(FUENTE_SISTEMA, 10)
                      ).pack(anchor="w", pady=(6, 0))
             vars_m = {}
             campos = ["ap_paterno", "ap_materno", "nombre", "fecha_nacimiento",
@@ -10728,12 +10788,12 @@ if TK_DISPONIBLE:
                 fila = tk.Frame(marco, bg=CREMA_CLARO)
                 fila.pack(fill="x", pady=1)
                 tk.Label(fila, text=campo.replace("_", " ").capitalize(),
-                         bg=CREMA_CLARO, fg=TEXTO_OSCURO, font=("Segoe UI", 9),
+                         bg=CREMA_CLARO, fg=TEXTO_OSCURO, font=(FUENTE_SISTEMA, 9),
                          width=18, anchor="w").pack(side="left")
                 var = tk.StringVar(value=mapeo.get(campo, ""))
                 vars_m[campo] = var
                 ttk.Combobox(fila, textvariable=var, values=encabezados,
-                             width=20, font=("Segoe UI", 9)).pack(side="left", padx=4)
+                             width=20, font=(FUENTE_SISTEMA, 9)).pack(side="left", padx=4)
             def _importar():
                 m = {k: v.get() for k, v in vars_m.items() if v.get()}
                 ok, msg, res = importar_pacientes_csv(ruta, m)
@@ -10746,7 +10806,7 @@ if TK_DISPONIBLE:
                 else:
                     messagebox.showerror("Error", msg, parent=win)
             tk.Button(marco, text="Importar", command=_importar, bg=AZUL, fg=TEXTO_CLARO,
-                      activebackground=AZUL_HOVER, font=("Segoe UI", 11, "bold"),
+                      activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 11, "bold"),
                       padx=12, pady=6).pack(anchor="e", pady=10)
             auto_tamano(win, self)
 
@@ -10767,25 +10827,25 @@ if TK_DISPONIBLE:
             marco = tk.Frame(d, bg=CREMA_CLARO, padx=14, pady=14)
             marco.pack(fill="both", expand=True)
             tk.Label(marco, text="Selecciona el expediente ORIGEN (se movera a _FUSIONADOS):",
-                     bg=CREMA_CLARO, fg=TEXTO_OSCURO, font=("Segoe UI", 10),
+                     bg=CREMA_CLARO, fg=TEXTO_OSCURO, font=(FUENTE_SISTEMA, 10),
                      wraplength=400, justify="left").pack(anchor="w")
-            lb_o = tk.Listbox(marco, height=6, font=("Segoe UI", 9), bg=BLANCO)
+            lb_o = tk.Listbox(marco, height=6, font=(FUENTE_SISTEMA, 9), bg=BLANCO)
             lb_o.pack(fill="x", pady=4)
             rutas_o = []
             for nom, ruta in listar_pacientes():
                 lb_o.insert("end", nom)
                 rutas_o.append(ruta)
             tk.Label(marco, text="Destino (se conserva):", bg=CREMA_CLARO,
-                     fg=TEXTO_OSCURO, font=("Segoe UI", 10)).pack(anchor="w", pady=(8, 0))
-            lb_d = tk.Listbox(marco, height=6, font=("Segoe UI", 9), bg=BLANCO)
+                     fg=TEXTO_OSCURO, font=(FUENTE_SISTEMA, 10)).pack(anchor="w", pady=(8, 0))
+            lb_d = tk.Listbox(marco, height=6, font=(FUENTE_SISTEMA, 9), bg=BLANCO)
             lb_d.pack(fill="x", pady=4)
             rutas_d = []
             for nom, ruta in listar_pacientes():
                 lb_d.insert("end", nom)
                 rutas_d.append(ruta)
             tk.Label(marco, text="Motivo:", bg=CREMA_CLARO, fg=TEXTO_OSCURO,
-                     font=("Segoe UI", 10)).pack(anchor="w", pady=(8, 0))
-            e_m = tk.Entry(marco, font=("Segoe UI", 10), bg=BLANCO)
+                     font=(FUENTE_SISTEMA, 10)).pack(anchor="w", pady=(8, 0))
+            e_m = tk.Entry(marco, font=(FUENTE_SISTEMA, 10), bg=BLANCO)
             e_m.pack(fill="x")
             def _fusionar():
                 io = lb_o.curselection()
@@ -10807,7 +10867,7 @@ if TK_DISPONIBLE:
                     messagebox.showerror("Error", msg, parent=d)
             tk.Button(marco, text="Fusionar", command=_fusionar, bg=ROJO_AVISO,
                       fg=TEXTO_CLARO, activebackground="#C43A4B",
-                      font=("Segoe UI", 11, "bold"), padx=12, pady=6).pack(anchor="e", pady=10)
+                      font=(FUENTE_SISTEMA, 11, "bold"), padx=12, pady=6).pack(anchor="e", pady=10)
             auto_tamano(d, self)
 
         def _cambiar_pin(self):
@@ -10828,15 +10888,15 @@ if TK_DISPONIBLE:
             if activo:
                 tk.Label(marco, text="PIN actual:", bg=CREMA_CLARO,
                          fg=TEXTO_OSCURO).pack(anchor="w", pady=(8, 0))
-                e_actual = tk.Entry(marco, font=("Segoe UI", 12), bg=BLANCO, show="*")
+                e_actual = tk.Entry(marco, font=(FUENTE_SISTEMA, 12), bg=BLANCO, show="*")
                 e_actual.pack(fill="x")
             tk.Label(marco, text="Nuevo PIN (4-6 digitos):", bg=CREMA_CLARO,
                      fg=TEXTO_OSCURO).pack(anchor="w", pady=(8, 0))
-            e_nuevo = tk.Entry(marco, font=("Segoe UI", 12), bg=BLANCO, show="*")
+            e_nuevo = tk.Entry(marco, font=(FUENTE_SISTEMA, 12), bg=BLANCO, show="*")
             e_nuevo.pack(fill="x")
             tk.Label(marco, text="Repite el nuevo PIN:", bg=CREMA_CLARO,
                      fg=TEXTO_OSCURO).pack(anchor="w", pady=(8, 0))
-            e_rep = tk.Entry(marco, font=("Segoe UI", 12), bg=BLANCO, show="*")
+            e_rep = tk.Entry(marco, font=(FUENTE_SISTEMA, 12), bg=BLANCO, show="*")
             e_rep.pack(fill="x")
 
             def guardar(*_a):
@@ -10879,7 +10939,7 @@ if TK_DISPONIBLE:
             fila.pack(fill="x", pady=(12, 0))
             tk.Button(fila, text="Guardar PIN", command=guardar, bg=AZUL,
                       fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                      font=("Segoe UI", 11, "bold")).pack(side="left")
+                      font=(FUENTE_SISTEMA, 11, "bold")).pack(side="left")
             if activo:
                 tk.Button(fila, text="Quitar PIN", command=quitar, bg=GRIS_SECUNDARIO,
                           fg=TEXTO_CLARO, activebackground=GRIS_APAGADO
@@ -10953,12 +11013,12 @@ if TK_DISPONIBLE:
             marco = tk.Frame(win, bg=CREMA_CLARO, padx=16, pady=16)
             marco.pack(fill="both", expand=True)
             tk.Label(marco, text="Respaldo / Verificacion / Restauracion",
-                     font=("Segoe UI", 14, "bold"), bg=CREMA_CLARO,
+                     font=(FUENTE_SISTEMA, 14, "bold"), bg=CREMA_CLARO,
                      fg=TEXTO_OSCURO).pack(anchor="w")
             tk.Label(marco,
                      text="5 componentes de datos + manifiesto SHA-256 · "
                           "cifrado opcional con contraseña",
-                     font=("Segoe UI", 9), bg=CREMA_CLARO, fg=GRIS_TEXTO
+                     font=(FUENTE_SISTEMA, 9), bg=CREMA_CLARO, fg=GRIS_TEXTO
                      ).pack(anchor="w", pady=(2, 6))
             modo = tk.StringVar(value="respaldar")
             for val, txt in [("respaldar", "Respaldar (copiar datos al destino)"),
@@ -10966,11 +11026,11 @@ if TK_DISPONIBLE:
                              ("restaurar", "Restaurar desde un respaldo (REEMPLAZA datos actuales)")]:
                 tk.Radiobutton(marco, text=txt, variable=modo, value=val,
                                bg=CREMA_CLARO, fg=TEXTO_OSCURO,
-                               selectcolor=BLANCO, font=("Segoe UI", 10)
+                               selectcolor=BLANCO, font=(FUENTE_SISTEMA, 10)
                                ).pack(anchor="w", pady=3)
             fila = tk.Frame(marco, bg=CREMA_CLARO)
             fila.pack(fill="x", pady=10)
-            e_dest = tk.Entry(fila, font=("Segoe UI", 11), bg=BLANCO)
+            e_dest = tk.Entry(fila, font=(FUENTE_SISTEMA, 11), bg=BLANCO)
             e_dest.pack(side="left", fill="x", expand=True, padx=(0, 6))
 
             def examinar():
@@ -10987,17 +11047,17 @@ if TK_DISPONIBLE:
             fila_clave.pack(fill="x", pady=(4, 0))
             tk.Label(fila_clave, text="Contraseña (opcional para cifrar):",
                      bg=CREMA_CLARO, fg=TEXTO_OSCURO,
-                     font=("Segoe UI", 10)).pack(anchor="w")
-            e_clave = tk.Entry(fila_clave, font=("Segoe UI", 11), bg=BLANCO, show="*")
+                     font=(FUENTE_SISTEMA, 10)).pack(anchor="w")
+            e_clave = tk.Entry(fila_clave, font=(FUENTE_SISTEMA, 11), bg=BLANCO, show="*")
             e_clave.pack(fill="x", pady=2)
             if not CRYPTO_DISPONIBLE:
                 tk.Label(fila_clave,
                          text="Aviso: cryptography no instalada → el cifrado no "
                               "está disponible (integridad SHA-256 siempre activa).",
-                         bg=CREMA_CLARO, fg=ROJO_AVISO, font=("Segoe UI", 8),
+                         bg=CREMA_CLARO, fg=ROJO_AVISO, font=(FUENTE_SISTEMA, 8),
                          wraplength=360, justify="left").pack(anchor="w")
             lbl_est = tk.Label(marco, text="", bg=CREMA_CLARO, fg=AZUL,
-                               font=("Segoe UI", 10))
+                               font=(FUENTE_SISTEMA, 10))
             lbl_est.pack(anchor="w", pady=4)
 
             def ejecutar():
@@ -11038,7 +11098,7 @@ if TK_DISPONIBLE:
 
             btn_ejec = tk.Button(marco, text="Ejecutar", command=ejecutar, bg=AZUL,
                                  fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
-                                 font=("Segoe UI", 11, "bold"), pady=6)
+                                 font=(FUENTE_SISTEMA, 11, "bold"), pady=6)
             btn_ejec.pack(anchor="e", pady=8)
             auto_tamano(win, self)
 
@@ -11098,12 +11158,12 @@ def pedir_pin(intentos_max=5):
     marco = tk.Frame(win, bg=CREMA_CLARO, padx=16, pady=14)
     marco.pack(fill="both", expand=True)
     tk.Label(marco, text="Ingresa el PIN de apertura",
-             font=("Segoe UI", 13, "bold"), bg=CREMA_CLARO,
+             font=(FUENTE_SISTEMA, 13, "bold"), bg=CREMA_CLARO,
              fg=TEXTO_OSCURO).pack(anchor="w")
-    e = tk.Entry(marco, font=("Segoe UI", 14), show="*", bg=BLANCO, justify="center")
+    e = tk.Entry(marco, font=(FUENTE_SISTEMA, 14), show="*", bg=BLANCO, justify="center")
     e.pack(fill="x", pady=10)
     lbl = tk.Label(marco, text=f"Intentos disponibles: {intentos_max}",
-                   bg=CREMA_CLARO, fg=GRIS_TEXTO, font=("Segoe UI", 9))
+                   bg=CREMA_CLARO, fg=GRIS_TEXTO, font=(FUENTE_SISTEMA, 9))
     lbl.pack(anchor="w")
     estado = {"ok": False, "restantes": intentos_max}
 
@@ -11130,7 +11190,7 @@ def pedir_pin(intentos_max=5):
             lbl.config(text=f"PIN incorrecto. Intentos: {estado['restantes']}")
 
     tk.Button(marco, text="Entrar", command=intentar, bg=AZUL, fg=TEXTO_CLARO,
-              activebackground=AZUL_HOVER, font=("Segoe UI", 11, "bold")
+              activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 11, "bold")
               ).pack(anchor="e")
     e.bind("<Return>", intentar)
     e.focus_set()
@@ -11162,6 +11222,8 @@ def main():
         print("ERROR: esta instalacion de Python no incluye tkinter.")
         print("En Windows reinstala Python marcando 'tcl/tk'.")
         print("En Linux: sudo apt install python3-tk")
+        print("En macOS usa el Python de python.org (ya trae Tk); si usaste")
+        print("brew: brew install python-tk")
         sys.exit(1)
     inicializar_estructura()
     _diag = diagnostico_arranque()

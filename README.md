@@ -16,11 +16,14 @@ consultorio.
 ## Cómo usarlo
 
 - **Windows:** doble clic en `Iniciar.bat` (o leer `LEEME_WINDOWS.txt`).
-- **Cualquier sistema:** `python app.py`
+- **macOS / Linux:** `sh Iniciar.sh` (o `python3 app.py`).
 
-Al primer arranque crea sus carpetas de trabajo (`EXPEDIENTES/`, `_CONFIG.json`,
-`_BITACORA.log`, etc.). Esas carpetas contienen los datos del consultorio y
-**nunca** deben copiarse a ningún repositorio (el `.gitignore` ya las excluye).
+Funciona en **Windows, macOS y Linux** con el mismo archivo (las decisiones
+de sistema operativo viven en una sola sección del código; `app.py` sección
+00c). Al primer arranque crea sus carpetas de trabajo (`EXPEDIENTES/`,
+`_CONFIG.json`, `_BITACORA.log`, etc.). Esas carpetas contienen los datos del
+consultorio y **nunca** deben copiarse a ningún repositorio (el `.gitignore`
+ya las excluye).
 
 ## Cómo verificar que funciona
 
@@ -39,7 +42,7 @@ python3 pruebas/test_ui_smoke.py   # requiere pantalla (display)
 | `app.py` | El sistema completo (un solo archivo, biblioteca estándar de Python) |
 | `esquemas/` | Esquemas canónicos: historia clínica NOM-004 y catálogos clínicos |
 | `pruebas/` | Suites de verificación automáticas |
-| `Iniciar.bat` · `LEEME_WINDOWS.txt` | Arranque y guía para la PC del consultorio |
+| `Iniciar.bat` · `Iniciar.sh` · `LEEME_WINDOWS.txt` | Arranque y guía para la PC del consultorio |
 
 ## Aviso
 
