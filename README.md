@@ -42,7 +42,13 @@ python3 pruebas/test_ui_smoke.py   # requiere pantalla (display)
 | `app.py` | El sistema completo (un solo archivo, biblioteca estándar de Python) |
 | `esquemas/` | Esquemas canónicos: historia clínica NOM-004 y catálogos clínicos |
 | `pruebas/` | Suites de verificación automáticas |
+| `iconos/` | Ícono del producto (PNG maestro; la app lo muestra en ventana y barra de tareas) |
 | `Iniciar.bat` · `Iniciar.sh` · `LEEME_WINDOWS.txt` | Arranque y guía para la PC del consultorio |
+
+En **Linux**, para que el ícono aparezca en los menús: copia `maternidad.desktop`
+(plantilla en el repo privado o genera uno con `Exec`/`Icon` apuntando a tus
+rutas absolutas) a `~/.local/share/applications/` y ejecuta
+`xdg-icon-resource install --novendor --size 256 iconos/icono_maternidad_256.png maternidad`.
 
 ## Aviso
 

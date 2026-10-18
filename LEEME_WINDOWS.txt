@@ -32,3 +32,15 @@ EMPAQUETADO SIN PYTHON INSTALADO (opcional)
 
 SIN RED
 - El sistema es 100% local; ninguna pantalla ni módulo usa internet.
+
+ICONO Y ACCESOS DIRECTOS (pedido 1.14)
+- Icono de la app: ya se muestra en la ventana y en la barra de tareas al
+  correr Iniciar.bat (se fija desde la propia aplicacion; no requiere nada
+  mas en este equipo).
+- Acceso directo en el escritorio o el menu de busqueda con el icono propio:
+  requiere el archivo .ico (pendiente, pedido 1.14.3). Cuando exista, se crea
+  con este comando de PowerShell:
+    $s=(New-Object -COM WScript.Shell).CreateShortcut("$env:USERPROFILE\Desktop\Maternidad.lnk")
+    $s.TargetPath="C:\RUTA\AL\SISTEMA\Iniciar.bat"
+    $s.IconLocation="C:\RUTA\AL\SISTEMA\iconos\icono_maternidad.ico"
+    $s.Save()

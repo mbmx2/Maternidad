@@ -106,6 +106,32 @@ ok4, msg4, _, _ = app.crear_paciente("PEREZ", "DIAZ", "ANA", "1990-01-01", "XXXX
                                      ventana_callback=lambda m: False)
 check("F-04 CURP invalida rechazada", (not ok4) and ("18" in msg4 or "invalid" in msg4.lower()), msg4)
 
+# --- S-008: SIN dialogo humano NUNCA se muta identidad de un existente ---
+# (a) existente sin CURP + nueva con CURP, sin callback -> candidato, curp intacta
+ok_c1, msg_c1, ruta_c1, _ = app.crear_paciente(
+    "GARCIA LOPEZ", "", "MARIA FERNANDA", "1985-03-15", "GARL850315MDFRXX01")
+_c1 = (app.cargar_paciente(ruta_c1) or {}).get("curp", "")
+check("S-008(a) sin callback: candidato y CURP del existente intacta",
+      (not ok_c1) and "Candidato" in msg_c1 and _c1 == "",
+      f"{ok_c1} {msg_c1} curp={_c1!r}")
+# (b) existente CON otra CURP + nueva distinta, sin callback -> candidato, ajena intacta
+ok_b0, _, ruta_b0, _ = app.crear_paciente(
+    "CASO", "DOS", "CURPS", "1991-05-05", "GARL850315MDFRXX01")
+ok_c2, msg_c2, _, _ = app.crear_paciente(
+    "CASO", "DOS", "CURPS", "1991-05-05", "LOMA850315MDFRXX01")   # sin callback
+_cb = (app.cargar_paciente(ruta_b0) or {}).get("curp", "")
+check("S-008(b) otra CURP sin callback: candidato y CURP original intacta",
+      ok_b0 and (not ok_c2) and "Candidato" in msg_c2
+      and _cb == "GARL850315MDFRXX01", f"{msg_c2} curp={_cb!r}")
+# (c) con confirmacion humana (callback False = "es la misma"), la CURP si se registra
+app.crear_paciente("CASO", "CUATRO", "CONFIRMA", "1991-06-06", "")
+ok_c3, msg_c3, ruta_c3, _ = app.crear_paciente(
+    "CASO", "CUATRO", "CONFIRMA", "1991-06-06", "REYN850315MDFRXX01",
+    ventana_callback=lambda m: False)
+_c3 = (app.cargar_paciente(ruta_c3) or {}).get("curp", "")
+check("S-008(c) con confirmacion humana la CURP si se registra",
+      (not ok_c3) and _c3 == "REYN850315MDFRXX01", f"{msg_c3} curp={_c3!r}")
+
 # --- DO-7: busqueda con espacios, acentos y minusculas ---
 r1 = app.buscar("garcia lopez")
 r2 = app.buscar("GARCÍA")
@@ -638,6 +664,16 @@ _fallan = [(n, round(app.indice_contraste(f, b), 2))
 check("B102: los 22 pares fg/bg reales cumplen WCAG AA (>=4.5)", not _fallan,
       str(_fallan))
 
+# --- ADR-0053/B104: todo boton del producto es plano (colores literales) ---
+import pathlib as _pathlib
+_src_app = _pathlib.Path(app.__file__).read_text(encoding="utf-8")
+check("B104: cero tk.Button( en app.py (los 90 botones son BotonPlano)",
+      _src_app.count("tk.Button(") == 0,
+      f"quedan {_src_app.count('tk.Button(')}")
+check("B104: la clase BotonPlano existe y pinta colores literales",
+      _src_app.count("class BotonPlano(tk.Label)") == 1
+      and "ADR-0053" in _src_app)
+
 # --- DO-10: consentimiento, aviso, NOM-004, bitacora ---
 okC1, msgC1, salC1 = app.generar_consentimiento(ruta, "Cesarea programada")
 check("DO-10 consentimiento generado", okC1, msgC1)
@@ -1081,12 +1117,23 @@ with open(_csv_path, "w", newline="", encoding="utf-8") as f:
     w.writerow(["IMPORT2", "TEST2", "MARIA", "1992-03-15", ""])
     w.writerow(["IMPORT", "TEST", "ANA", "1990-05-20", ""])  # duplicado
     w.writerow(["FALTA", "", "", "invalida", ""])  # invalida
+    w.writerow(["IMPORT", "TEST", "ANA", "1990-05-20", "GARL850315MDFRXX01"])  # candidato: homonima con CURP
 mapeo2 = app.detectar_mapeo_csv(["Apellido Paterno", "Apellido Materno", "Nombre", "Fecha Nacimiento", "CURP"])
 ok_imp, msg_imp, res_imp = app.importar_pacientes_csv(str(_csv_path), mapeo2)
 check("T27 importar CSV ok", ok_imp, msg_imp)
 check("T27 importados=2", res_imp.get("importados") == 2, str(res_imp))
 check("T27 duplicado omitido", res_imp.get("duplicados") == 1, str(res_imp))
 check("T27 invalido omitido", res_imp.get("invalidos") == 1, str(res_imp))
+check("T27/S-008 candidato reportado con fila y motivo",
+      res_imp.get("candidatos") == 1
+      and any("Fila" in e and "Candidato" in e for e in res_imp.get("errores", [])),
+      str(res_imp.get("errores")))
+_ruta_ana = app.ruta_por_clave(app.clave_paciente(
+    app.normalizar("IMPORT TEST ANA"), "1990-05-20"))
+_curp_ana = (app.cargar_paciente(_ruta_ana) or {}).get("curp", "")
+check("T27/S-008 import sin callback: CURP del expediente intacta",
+      _curp_ana == "", f"curp={_curp_ana!r}")
+check("T27 resumen incluye candidatos", "Candidatos a revision: 1" in msg_imp, msg_imp)
 
 # T28: dictado_disponible
 ok_dict, msg_dict = app.dictado_disponible()

@@ -125,6 +125,9 @@ check("Pildora: pagina activa en blanco con barra dorada",
 check("ADR-0052: nav del sidebar en widget plano (no tk.Button)",
       all(isinstance(b, _tk.Label) for b in A.nav.values())
       and len(A.nav) == 8)
+# Pedido 1.14.2: la ventana principal carga el icono propio (PNG 256)
+check("1.14.2: icono de la app cargado en la ventana",
+      hasattr(A, "_icono_img") and A._icono_img.width() > 0)
 check("Sidebar: tarjeta de contexto + pie con autor",
       hasattr(A, "nav_ctx_nombre") and hasattr(A, "lbl_nav_autor")
       and "SMOKE" in A.nav_ctx_nombre.cget("text"),
@@ -553,8 +556,9 @@ except Exception as e:
 check("Binding boton derecho universal", hay_ctx3)
 check("Menu universal en Frame (no Entry) != None", ctx_univ)
 # v4.13: menu universal en Button y texto_de_ventana correcto
+# (ADR-0053: se prueba con BotonPlano, la clase real de producto)
 try:
-    b_test = _tk.Button(A, text="Prueba")
+    b_test = app.BotonPlano(A, text="Prueba")
     m_b = app._menu_contexto(A, b_test)
     b_ok = m_b is not None
     b_test.destroy()

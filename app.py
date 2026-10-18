@@ -162,6 +162,18 @@ def comando_abrir(ruta):
     return "xdg-open", [ruta]
 
 
+def fijar_icono_proceso():
+    """Pedido 1.14.4: en Windows, identidad de app para la barra de tareas
+    (AUMID via ctypes de stdlib). En otros SO no aplica (nada que hacer)."""
+    if ES_WINDOWS:
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "consultorio.maternidad.app")
+        except Exception:
+            pass
+
+
 # --- ADR-0052: legibilidad verificable (WCAG 2.1, puro y testeable B102) ---
 # La diferencia de legibilidad entre SO NO viene del hex (el #RRGGBB se pinta
 # identico en todos), sino de: (a) widgets dibujados por el SO (bezel Aqua),
@@ -2697,14 +2709,26 @@ def crear_paciente(ap_p, ap_m, nombres, fecha_txt, curp="", ventana_callback=Non
         curp_nueva = (curp or "").strip().upper()
         crear_separado = False
         if curp_nueva and curp_existente and curp_nueva != curp_existente:
-            crear_separado = bool(ventana_callback and ventana_callback(
+            # S-008: sin dialogo humano NUNCA decidir homonimia (ni crear ni
+            # mutar): se devuelve como CANDIDATO a revision manual.
+            if ventana_callback is None:
+                return False, ("Candidato: existe con OTRA CURP (posible "
+                               "homonima); sin confirmacion no se crea "
+                               "separado. Revision manual."), str(ruta), existente
+            crear_separado = bool(ventana_callback(
                 "Ya existe un expediente con ese nombre y fecha pero con OTRA CURP.\n"
                 "Es probablemente otra paciente (homónima).\n\n¿Crear expediente separado?"
             ))
             if not crear_separado:
                 return False, "Ya existe (misma identidad).", str(ruta), existente
         elif curp_nueva and not curp_existente:
-            crear_separado = bool(ventana_callback and ventana_callback(
+            # S-008: SIN confirmacion, la CURP nueva NO se inyecta en el
+            # expediente existente (antes: se escribia a ciegas y podia dejar
+            # CURP ajena en una homonima — caso real del import CSV sin callback).
+            if ventana_callback is None:
+                return False, ("Candidato: existe sin CURP; la CURP nueva no "
+                               "se registra sin confirmacion. Revision manual."), str(ruta), existente
+            crear_separado = bool(ventana_callback(
                 "Ya existe un expediente con ese nombre y fecha SIN CURP registrada.\n\n"
                 "Si es OTRA paciente (homónima): Si -> expediente separado.\n"
                 "Si es la MISMA paciente: No -> se guarda la CURP en su expediente."
@@ -5124,7 +5148,8 @@ def importar_pacientes_csv(ruta_csv, mapeo):
             filas = list(lector)
     except Exception as e:
         return False, f"No se pudo leer el CSV: {e}", {}
-    resumen = {"leidas": len(filas), "importados": 0, "duplicados": 0, "invalidos": 0, "errores": []}
+    resumen = {"leidas": len(filas), "importados": 0, "duplicados": 0,
+               "candidatos": 0, "invalidos": 0, "errores": []}
     for i, fila in enumerate(filas, start=2):
         try:
             ap_p = (fila.get(mapeo.get("ap_paterno", ""), "") or "").strip()
@@ -5148,6 +5173,11 @@ def importar_pacientes_csv(ruta_csv, mapeo):
                 if tel or correo or medico:
                     guardar_datos_secundarios(ruta_n, tel, correo, curp, medico, "")
                 resumen["importados"] += 1
+            elif "Candidato" in msg:
+                # S-008/S-010: homonima sin confirmacion — NUNCA muta; se
+                # reporta fila y motivo para revision manual del operador
+                resumen["candidatos"] += 1
+                resumen["errores"].append(f"Fila {i}: {msg}")
             elif "Ya existe" in msg:
                 resumen["duplicados"] += 1
             else:
@@ -5158,6 +5188,7 @@ def importar_pacientes_csv(ruta_csv, mapeo):
             resumen["errores"].append(f"Fila {i}: {e}")
     msg = (f"Importados: {resumen['importados']} · "
            f"Duplicados omitidos: {resumen['duplicados']} · "
+           f"Candidatos a revision: {resumen['candidatos']} · "
            f"Inválidos: {resumen['invalidos']}")
     return True, msg, resumen
 
@@ -5346,7 +5377,7 @@ if TK_DISPONIBLE:
 
             f_anio = tk.Frame(self, bg=CREMA)
             f_anio.pack(pady=(12, 2))
-            tk.Button(f_anio, text="‹", width=3, command=lambda: self._mover(anio=-1),
+            BotonPlano(f_anio, text="‹", width=3, command=lambda: self._mover(anio=-1),
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER
                       ).pack(side="left", padx=3)
             self.anio_var = tk.StringVar(value=str(self.anio))
@@ -5357,13 +5388,13 @@ if TK_DISPONIBLE:
             self.anio_cb.pack(side="left", padx=4)
             self.anio_cb.bind("<Return>", self._enter_anio)
             self.anio_cb.bind("<<ComboboxSelected>>", self._sel_anio)
-            tk.Button(f_anio, text="›", width=3, command=lambda: self._mover(anio=1),
+            BotonPlano(f_anio, text="›", width=3, command=lambda: self._mover(anio=1),
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER
                       ).pack(side="left", padx=3)
 
             f_mes = tk.Frame(self, bg=CREMA)
             f_mes.pack(pady=2)
-            tk.Button(f_mes, text="‹", width=3, command=lambda: self._mover(mes=-1),
+            BotonPlano(f_mes, text="‹", width=3, command=lambda: self._mover(mes=-1),
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER
                       ).pack(side="left", padx=3)
             self.mes_var = tk.StringVar(value=MESES_LARGOS[self.mes - 1])
@@ -5372,7 +5403,7 @@ if TK_DISPONIBLE:
             self.mes_cb.pack(side="left", padx=4)
             self.mes_cb.bind("<Return>", self._enter_mes)
             self.mes_cb.bind("<<ComboboxSelected>>", self._sel_mes)
-            tk.Button(f_mes, text="›", width=3, command=lambda: self._mover(mes=1),
+            BotonPlano(f_mes, text="›", width=3, command=lambda: self._mover(mes=1),
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER
                       ).pack(side="left", padx=3)
 
@@ -5399,15 +5430,15 @@ if TK_DISPONIBLE:
 
             f_pie = tk.Frame(self, bg=CREMA)
             f_pie.pack(fill="x", padx=8, pady=(0, 10))
-            tk.Button(f_pie, text="Hoy", command=self._hoy, width=8,
+            BotonPlano(f_pie, text="Hoy", command=self._hoy, width=8,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER
                       ).pack(side="left", padx=4)
-            self.btn_sel = tk.Button(f_pie, text="Seleccionar fecha",
+            self.btn_sel = BotonPlano(f_pie, text="Seleccionar fecha",
                                      command=self._elegir_seleccion, width=16,
                                      bg=AZUL, fg=TEXTO_CLARO,
                                      activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 10, "bold"))
             self.btn_sel.pack(side="left", padx=4)
-            tk.Button(f_pie, text="Cancelar", command=self.destroy, width=10,
+            BotonPlano(f_pie, text="Cancelar", command=self.destroy, width=10,
                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO, activebackground=GRIS_APAGADO
                       ).pack(side="right", padx=4)
 
@@ -5540,7 +5571,7 @@ if TK_DISPONIBLE:
                 fila, col = divmod(offset + d - 1, 7)
                 permitido = (not futuro) and d <= maximo
                 elegido = permitido and d == self.dia
-                boton = tk.Button(self.frame_dias, text=str(d), width=5,
+                boton = BotonPlano(self.frame_dias, text=str(d), width=5,
                                   bg=AZUL if elegido else BLANCO,
                                   fg=TEXTO_CLARO if elegido else TEXTO_OSCURO,
                                   activebackground=AZUL_HOVER, relief="flat",
@@ -5576,7 +5607,7 @@ if TK_DISPONIBLE:
             CalendarioPopup(popup_parent or master, _escribir,
                             formato=formato, iso_inicial=iso)
 
-        return tk.Button(master, text="[Cal]", command=_abrir, bg=AZUL,
+        return BotonPlano(master, text="[Cal]", command=_abrir, bg=AZUL,
                          fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                          font=(FUENTE_SISTEMA, 9))
 
@@ -5832,6 +5863,89 @@ if TK_DISPONIBLE:
         except Exception:
             pass
 
+    class BotonPlano(tk.Label):
+        """ADR-0053: boton con colores LITERALES en todos los SO.
+
+        En macOS el tk.Button nativo (tema Aqua) pinta su propia cara y PISA
+        bg/fg: texto claro sobre cara clara = ilegible (reporte del dueno en
+        Registrar/Administracion/Respaldo tras el fix del sidebar). Aqui el
+        hex se respeta siempre, con la MISMA API que usa app.py en los 90
+        call sites: text, command, bg/fg, activebackground (hover+pulso),
+        activeforeground, state (nativo de Label), width, relief, bd,
+        highlight*, cursor, anchor, disabledforeground por defecto legible.
+        El menu contextual universal sigue llegando (se enlaza a la ventana).
+        Sin foco Tab (los atajos F/Ctrl y Enter de formularios cubren la
+        navegacion — mismo tradeoff aceptado en el sidebar, ADR-0052).
+        """
+
+        def __init__(self, parent, text="", command=None,
+                     activebackground=None, activeforeground=None, **kw):
+            kw.setdefault("disabledforeground", GRIS_APAGADO)
+            if activebackground is not None:
+                kw.setdefault("activebackground", activebackground)
+            if activeforeground is not None:
+                kw.setdefault("activeforeground", activeforeground)
+            super().__init__(parent, text=text, **kw)
+            self._cmd = command
+            self._ab = activebackground
+            self._af = activeforeground
+            self._bg0 = self.cget("bg")
+            self._fg0 = self.cget("fg")
+            self._pulsado = False
+            self.bind("<ButtonPress-1>", self._pulsa, add="+")
+            self.bind("<ButtonRelease-1>", self._suelta, add="+")
+            self.bind("<Enter>", self._entra, add="+")
+            self.bind("<Leave>", self._sale, add="+")
+
+        def _normal(self):
+            return str(self.cget("state")) == "normal"
+
+        def _pulsa(self, _e=None):
+            if not self._normal():
+                return
+            self._pulsado = True
+            if self._ab:
+                tk.Label.config(self, bg=self._ab)
+            if self._af:
+                tk.Label.config(self, fg=self._af)
+
+        def _suelta(self, _e=None):
+            presionado, self._pulsado = self._pulsado, False
+            if self._ab or self._af:
+                tk.Label.config(self, bg=self._bg0, fg=self._fg0)
+            if presionado and self._normal() and self._cmd:
+                self._cmd()
+
+        def _entra(self, _e=None):
+            if not self._normal():
+                return
+            if self._ab:
+                tk.Label.config(self, bg=self._ab)
+            if self._af:
+                tk.Label.config(self, fg=self._af)
+
+        def _sale(self, _e=None):
+            if not self._normal():
+                return
+            if self._ab or self._af:
+                tk.Label.config(self, bg=self._bg0, fg=self._fg0)
+
+        def config(self, cnf=None, **kw):
+            # cachea la base real para restaurar hover/pulso sin pisar cambios
+            if "bg" in kw:
+                self._bg0 = kw["bg"]
+            if "fg" in kw:
+                self._fg0 = kw["fg"]
+            if "activebackground" in kw:
+                self._ab = kw["activebackground"]
+            if "activeforeground" in kw:
+                self._af = kw["activeforeground"]
+            if "command" in kw:
+                self._cmd = kw.pop("command")
+            return tk.Label.config(self, cnf, **kw)
+
+        configure = config
+
     class Tooltip:
         """Aidita emergente tras 600 ms (ADR-0027). Sin modal ni grab."""
 
@@ -5906,9 +6020,9 @@ if TK_DISPONIBLE:
                      justify="left").pack(anchor="w", pady=4)
             pie = tk.Frame(marco, bg=CREMA_CLARO)
             pie.pack(fill="x", pady=14)
-            tk.Button(pie, text="Generar", command=self._generar, width=12,
+            BotonPlano(pie, text="Generar", command=self._generar, width=12,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER).pack(side="right", padx=4)
-            tk.Button(pie, text="Cancelar", command=self.destroy, width=12,
+            BotonPlano(pie, text="Cancelar", command=self.destroy, width=12,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER).pack(side="right")
             auto_tamano(self, parent_app)
 
@@ -6003,32 +6117,32 @@ if TK_DISPONIBLE:
 
             pie = tk.Frame(marco, bg=CREMA_CLARO)
             pie.pack(fill="x", pady=(12, 0))
-            self.btn_editar = tk.Button(pie, text="Editar datos", command=self._editar,
+            self.btn_editar = BotonPlano(pie, text="Editar datos", command=self._editar,
                                         bg=AZUL, fg=TEXTO_CLARO,
                                         activebackground=AZUL_HOVER, padx=8, pady=5)
             self.btn_editar.pack(side="left", padx=3)
-            self.btn_guardar = tk.Button(pie, text="Guardar", command=self._guardar,
+            self.btn_guardar = BotonPlano(pie, text="Guardar", command=self._guardar,
                                          bg=VERDE_OK, fg="white", state="disabled",
                                          padx=8, pady=5)
             self.btn_guardar.pack(side="left", padx=3)
-            tk.Button(pie, text="Abrir carpeta", command=lambda: abrir_carpeta(self.ruta),
+            BotonPlano(pie, text="Abrir carpeta", command=lambda: abrir_carpeta(self.ruta),
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                       padx=8, pady=5).pack(side="left", padx=3)
-            tk.Button(pie, text="Ver historial", command=self._historial,
+            BotonPlano(pie, text="Ver historial", command=self._historial,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                       padx=8, pady=5).pack(side="left", padx=3)
-            tk.Button(pie, text="Export anonimo",
+            BotonPlano(pie, text="Export anonimo",
                       command=lambda: self.app._exportar_anonimo(),
                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO,
                       activebackground=GRIS_APAGADO, padx=8, pady=5
                       ).pack(side="left", padx=3)
             # C-22: timeline en 1 clic desde la Ficha
-            tk.Button(pie, text="Timeline",
+            BotonPlano(pie, text="Timeline",
                       command=lambda: self.app._abrir_timeline(),
                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO,
                       activebackground=GRIS_APAGADO, padx=8, pady=5
                       ).pack(side="left", padx=3)
-            tk.Button(pie, text="Cerrar", command=self.destroy, bg=GRIS_SECUNDARIO,
+            BotonPlano(pie, text="Cerrar", command=self.destroy, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
                       padx=8, pady=5).pack(side="right", padx=3)
             auto_tamano(self, parent_app)
@@ -6174,7 +6288,7 @@ if TK_DISPONIBLE:
                     ("Refrescar", self._refrescar, AZUL),
                     ("Dictar (voz)", self._dictar, GRIS_SECUNDARIO),
                     ("Cerrar", self.destroy, GRIS_SECUNDARIO)]:
-                tk.Button(pie, text=txt, command=cmd, bg=color, fg=TEXTO_CLARO,
+                BotonPlano(pie, text=txt, command=cmd, bg=color, fg=TEXTO_CLARO,
                           activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 10),
                           padx=8, pady=BTN_PADY).pack(side="left", padx=3)
             self._refrescar()
@@ -6209,7 +6323,7 @@ if TK_DISPONIBLE:
                                      "En Linux: Super+Ctrl+Espacio.",
                          bg=CREMA_CLARO, fg=TEXTO_OSCURO, wraplength=400,
                          justify="left", font=(FUENTE_SISTEMA, 10)).pack(anchor="w", pady=6)
-            tk.Button(marco, text="Cerrar", command=win.destroy, bg=GRIS_SECUNDARIO,
+            BotonPlano(marco, text="Cerrar", command=win.destroy, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO, padx=10, pady=6
                       ).pack(anchor="e", pady=8)
             auto_tamano(win, self)
@@ -6277,7 +6391,7 @@ if TK_DISPONIBLE:
                          ).pack(anchor="w", pady=(4, 0))
             pie2 = tk.Frame(cuerpo, bg=CREMA_CLARO)
             pie2.pack(fill="x", pady=(8, 0))
-            tk.Button(pie2, text="Cerrar", command=vw.destroy, bg=GRIS_SECUNDARIO,
+            BotonPlano(pie2, text="Cerrar", command=vw.destroy, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO, padx=10, pady=6
                       ).pack(side="right")
             criticos = [h for h in hall if h.get("nivel") == "critico"]
@@ -6294,7 +6408,7 @@ if TK_DISPONIBLE:
                     self._refrescar_alertas()
                     self.app._actualizar_etiqueta()
                     vw.destroy()
-                tk.Button(pie2, text=f"Registrar {len(criticos)} alerta(s)",
+                BotonPlano(pie2, text=f"Registrar {len(criticos)} alerta(s)",
                           command=_altas, bg=ROJO_AVISO, fg=TEXTO_CLARO,
                           activebackground="#C43A4B", font=(FUENTE_SISTEMA, 10, "bold"),
                           padx=10, pady=6).pack(side="right", padx=6)
@@ -6481,29 +6595,29 @@ if TK_DISPONIBLE:
             for txt, tipo in [("+ Nota ingreso", "ingreso"),
                               ("+ Evolucion", "evolucion"),
                               ("+ Egreso", "egreso")]:
-                tk.Button(fila_notas, text=txt, command=lambda tp=tipo:
+                BotonPlano(fila_notas, text=txt, command=lambda tp=tipo:
                           self._crear_nota(tp), bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO,
                           activebackground=GRIS_APAGADO, font=(FUENTE_SISTEMA, 9),
                           padx=6, pady=2).pack(side="left", padx=3)
-            tk.Button(fila_notas, text="Exportar checklist (.xlsx)",
+            BotonPlano(fila_notas, text="Exportar checklist (.xlsx)",
                       command=self._exportar_checklist, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
                       font=(FUENTE_SISTEMA, 9), padx=8, pady=3
                       ).pack(side="right", padx=3)
-            tk.Button(fila_notas, text="Vista previa A-M",
+            BotonPlano(fila_notas, text="Vista previa A-M",
                       command=self._vista_previa_v2, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
                       font=(FUENTE_SISTEMA, 9), padx=8, pady=3
                       ).pack(side="right", padx=3)
-            tk.Button(fila_notas, text="Generar .txt A-M",
+            BotonPlano(fila_notas, text="Generar .txt A-M",
                       command=self._generar_v2, bg=AZUL, fg=TEXTO_CLARO,
                       activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 10, "bold"),
                       padx=10, pady=3).pack(side="right", padx=3)
-            tk.Button(fila_notas, text="Guardar seccion", command=self._guardar,
+            BotonPlano(fila_notas, text="Guardar seccion", command=self._guardar,
                       bg=VERDE_OK, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                       font=(FUENTE_SISTEMA, 10, "bold"), padx=10, pady=3
                       ).pack(side="right", padx=3)
-            tk.Button(fila_notas, text="Cerrar", command=self.destroy,
+            BotonPlano(fila_notas, text="Cerrar", command=self.destroy,
                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO,
                       activebackground=GRIS_APAGADO, font=(FUENTE_SISTEMA, 10),
                       padx=10, pady=3).pack(side="right", padx=3)
@@ -6840,7 +6954,7 @@ if TK_DISPONIBLE:
             box.insert("1.0", texto)
             box.config(state="disabled")
             box.pack(fill="both", expand=True, pady=6)
-            tk.Button(caja, text="Cerrar", command=vw.destroy, bg=GRIS_SECUNDARIO,
+            BotonPlano(caja, text="Cerrar", command=vw.destroy, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO, padx=10, pady=6
                       ).pack(anchor="e")
             auto_tamano(vw, self)
@@ -6918,7 +7032,7 @@ if TK_DISPONIBLE:
                          font=(FUENTE_SISTEMA, 10, "bold"), anchor="w", wraplength=540,
                          justify="left").pack(fill="x", pady=(6, 0))
                 if crit:
-                    tk.Button(marco, text="Marcar alerta (qSOFA)",
+                    BotonPlano(marco, text="Marcar alerta (qSOFA)",
                               command=self._marcar_qsofa, bg=ROJO_AVISO,
                               fg=TEXTO_CLARO, activebackground="#C43A4B",
                               font=(FUENTE_SISTEMA, 10, "bold"), padx=10, pady=6
@@ -6929,11 +7043,11 @@ if TK_DISPONIBLE:
                          justify="left").pack(fill="x", pady=(6, 0))
             pie = tk.Frame(marco, bg=CREMA_CLARO)
             pie.pack(fill="x", pady=(10, 0))
-            tk.Button(pie, text="Cancelar", command=self.destroy,
+            BotonPlano(pie, text="Cancelar", command=self.destroy,
                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO,
                       activebackground=GRIS_APAGADO, padx=10, pady=6
                       ).pack(side="left")
-            tk.Button(pie, text="Registrar de todos modos", command=self._aceptar,
+            BotonPlano(pie, text="Registrar de todos modos", command=self._aceptar,
                       bg=VERDE_OK, fg=TEXTO_CLARO, activebackground="#14602F",
                       font=(FUENTE_SISTEMA, 11, "bold"), padx=12, pady=6
                       ).pack(side="right")
@@ -6981,10 +7095,10 @@ if TK_DISPONIBLE:
             self.e_cedula.pack(side="right", padx=4)
             pie = tk.Frame(marco, bg=CREMA_CLARO)
             pie.pack(fill="x", pady=(10, 0))
-            tk.Button(pie, text="Cancelar", command=self.destroy, bg=GRIS_SECUNDARIO,
+            BotonPlano(pie, text="Cancelar", command=self.destroy, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO, padx=10, pady=6
                       ).pack(side="left")
-            tk.Button(pie, text="Registrar respuesta", command=self._guardar,
+            BotonPlano(pie, text="Registrar respuesta", command=self._guardar,
                       bg=VERDE_OK, fg=TEXTO_CLARO, activebackground="#14602F",
                       font=(FUENTE_SISTEMA, 11, "bold"), padx=12, pady=6
                       ).pack(side="right")
@@ -7055,7 +7169,7 @@ if TK_DISPONIBLE:
             self.lista.pack(fill="x", pady=(6, 0))
             self.lista.bind("<<ListboxSelect>>", lambda e: self._cargar_calc())
             # ADR-0043: fijar/quitar la calculadora actual de ★ Prioritarias
-            self.btn_star = tk.Button(marco, text="☆ Prioritaria", width=14,
+            self.btn_star = BotonPlano(marco, text="☆ Prioritaria", width=14,
                                       command=self._alternar_prioritaria,
                                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO,
                                       activebackground=GRIS_APAGADO,
@@ -7091,7 +7205,7 @@ if TK_DISPONIBLE:
             self.lbl_res_msg.pack(fill="x", padx=12, pady=(0, 8))
             pie = tk.Frame(marco, bg=CREMA_CLARO)
             pie.pack(fill="x", pady=(8, 0))
-            tk.Button(pie, text="Guardar en la nota", command=self._guardar_nota,
+            BotonPlano(pie, text="Guardar en la nota", command=self._guardar_nota,
                       bg=VERDE_OK, fg=TEXTO_CLARO, activebackground="#14602F",
                       font=(FUENTE_SISTEMA, 10, "bold"), padx=10, pady=6
                       ).pack(side="left")
@@ -7099,7 +7213,7 @@ if TK_DISPONIBLE:
             tk.Label(pie, text="Resultado en vivo — sin boton",
                      bg=CREMA_CLARO, fg=GRIS_TERCIARIO,
                      font=(FUENTE_SISTEMA, 8)).pack(side="right", padx=6)
-            tk.Button(pie, text="Ver pacientes",
+            BotonPlano(pie, text="Ver pacientes",
                       command=lambda: self.app.show_page("home"),
                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO,
                       activebackground=GRIS_APAGADO, padx=10, pady=6
@@ -7461,6 +7575,17 @@ if TK_DISPONIBLE:
             self.geometry("1080x760")
             self.minsize(880, 620)
             self.configure(bg=CREMA)
+            # Pedido 1.14.2/1.14.4: icono propio en TODAS las SO; en Windows
+            # AUMID para que la barra de tareas muestre NUESTRO icono y no el
+            # de python.exe. iconphoto(default=True) hereda a los dialogos.
+            try:
+                fijar_icono_proceso()
+                _png_icono = BASE_DIR / "iconos" / "icono_maternidad_256.png"
+                if _png_icono.exists():
+                    self._icono_img = tk.PhotoImage(file=str(_png_icono))
+                    self.iconphoto(True, self._icono_img)
+            except Exception:
+                pass
             self.ruta_activa = None
             self.datos_activos = None
             self.recientes_rutas = []
@@ -7841,12 +7966,12 @@ if TK_DISPONIBLE:
             }
             for txt, cmd, primario in tabla.get(nombre, []):
                 if primario:
-                    tk.Button(self.header_acc, text=f"▸ {txt}", command=cmd, bg=AZUL,
+                    BotonPlano(self.header_acc, text=f"▸ {txt}", command=cmd, bg=AZUL,
                               fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                               font=(FUENTE_SISTEMA, 10, "bold"), padx=12, pady=6,
                               cursor="hand2").pack(side="right", padx=4)
                 else:
-                    tk.Button(self.header_acc, text=txt, command=cmd, bg=BLANCO,
+                    BotonPlano(self.header_acc, text=txt, command=cmd, bg=BLANCO,
                               fg=AZUL, activebackground="#E8EEF6", relief="flat",
                               highlightthickness=1, highlightbackground=GRIS_BORDE,
                               font=(FUENTE_SISTEMA, 10), padx=12, pady=6,
@@ -8054,10 +8179,10 @@ if TK_DISPONIBLE:
                                                 fg=TEXTO_OSCURO, relief="solid", bd=1)
             self.entry_busqueda_home.grid(row=0, column=0, sticky="we", padx=(0, 6))
             self.search_var.trace_add("write", self._programar_busqueda)
-            tk.Button(marco_busq, text="Buscar", command=self._ejecutar_busqueda,
+            BotonPlano(marco_busq, text="Buscar", command=self._ejecutar_busqueda,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                       font=(FUENTE_SISTEMA, 10)).grid(row=0, column=1, padx=3)
-            tk.Button(marco_busq, text="Filtros", command=self._dialogo_filtros,
+            BotonPlano(marco_busq, text="Filtros", command=self._dialogo_filtros,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                       font=(FUENTE_SISTEMA, 10)).grid(row=0, column=2, padx=3)
             self.fila_chips = tk.Frame(home, bg=CREMA_CLARO)
@@ -8129,7 +8254,7 @@ if TK_DISPONIBLE:
                     ("Resumen", self._ctx_resumen, False),
                     ("Graficos", lambda: self.show_page("graficos"), False),
                     ("Timeline", self._abrir_timeline, False)]:
-                tk.Button(acc_col, text=txt, command=cmd,
+                BotonPlano(acc_col, text=txt, command=cmd,
                           bg=AZUL if prim else GRIS_SECUNDARIO, fg=TEXTO_CLARO,
                           activebackground=AZUL_HOVER if prim else GRIS_APAGADO,
                           font=(FUENTE_SISTEMA, 9, "bold" if prim else "normal"),
@@ -8140,7 +8265,7 @@ if TK_DISPONIBLE:
             tk.Label(self.frame_vacio_home, text="Aun no hay pacientes registradas.",
                      font=(FUENTE_SISTEMA, 12), bg=CREMA_CLARO, fg=TEXTO_OSCURO
                      ).pack(anchor="w")
-            tk.Button(self.frame_vacio_home, text=" Registrar primera paciente",
+            BotonPlano(self.frame_vacio_home, text=" Registrar primera paciente",
                       command=lambda: self.show_page("register"),
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                       font=(FUENTE_SISTEMA, 10, "bold"), padx=10, pady=4
@@ -8156,7 +8281,7 @@ if TK_DISPONIBLE:
                 ("Abrir expediente", self._abrir_de_tree),
                 ("Limpiar filtros", self._limpiar_filtros),
             ]:
-                bb = tk.Button(marco_btns, text=txt, command=cmd, bg=GRIS_SECUNDARIO,
+                bb = BotonPlano(marco_btns, text=txt, command=cmd, bg=GRIS_SECUNDARIO,
                                fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
                                font=(FUENTE_SISTEMA, 10), padx=12, pady=BTN_PADY)
                 bb.pack(side="left", padx=4)
@@ -8302,7 +8427,7 @@ if TK_DISPONIBLE:
                 for nombre, ruta, ult, delta in items[:5]:
                     if izq:
                         txt = f"● {nombre} · {fecha_legible(ult)}"
-                        b = tk.Button(col, text=txt, command=lambda rr=ruta:
+                        b = BotonPlano(col, text=txt, command=lambda rr=ruta:
                                       self.seleccionar_paciente(rr, origen="home"),
                                       bg=BLANCO, fg=AZUL, relief="flat",
                                       activebackground="#E8EEF6", anchor="w",
@@ -8366,11 +8491,11 @@ if TK_DISPONIBLE:
 
             pie = tk.Frame(cuerpo, bg=CREMA_CLARO)
             pie.pack(fill="x")
-            tk.Button(pie, text="Generar archivo y abrir", command=_archivo,
+            BotonPlano(pie, text="Generar archivo y abrir", command=_archivo,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                       font=(FUENTE_SISTEMA, 10, "bold"), padx=10, pady=6
                       ).pack(side="left")
-            tk.Button(pie, text="Cerrar", command=win.destroy, bg=GRIS_SECUNDARIO,
+            BotonPlano(pie, text="Cerrar", command=win.destroy, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
                       padx=10, pady=6).pack(side="right")
             auto_tamano(win, self)
@@ -8417,7 +8542,7 @@ if TK_DISPONIBLE:
                 chip.pack(side="left", padx=(0, ESP_S))
                 tk.Label(chip, text=f" {texto} ", bg=AZUL_CHIP, fg=TEXTO_OSCURO,
                          font=(FUENTE_SISTEMA, FUENTE_XS)).pack(side="left")
-                tk.Button(chip, text="×", command=lambda k=clave: self._quitar_chip(k),
+                BotonPlano(chip, text="×", command=lambda k=clave: self._quitar_chip(k),
                           bg=AZUL_CHIP, fg=ROJO_AVISO, activebackground=AZUL_CHIP,
                           activeforeground=ROJO_AVISO, relief="flat", bd=0,
                           font=(FUENTE_SISTEMA, FUENTE_M, "bold"), cursor="hand2"
@@ -8619,10 +8744,10 @@ if TK_DISPONIBLE:
                 self._ejecutar_busqueda()
                 win.destroy()
 
-            tk.Button(marco, text="Limpiar filtros", command=limpiar,
+            BotonPlano(marco, text="Limpiar filtros", command=limpiar,
                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
                       font=(FUENTE_SISTEMA, 11)).grid(row=4, column=0, pady=14, sticky="w")
-            tk.Button(marco, text="Aplicar", command=aplicar, bg=AZUL, fg=TEXTO_CLARO,
+            BotonPlano(marco, text="Aplicar", command=aplicar, bg=AZUL, fg=TEXTO_CLARO,
                       activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 11)
                       ).grid(row=4, column=1, pady=14, sticky="e")
             win.bind("<Escape>", lambda ev: win.destroy())
@@ -8663,12 +8788,12 @@ if TK_DISPONIBLE:
                                                self.entry_busqueda_home.focus_set()),
                      False)]:
                 if prim:
-                    tk.Button(acciones, text=f"▸ {txt}", command=cmd, bg=AZUL,
+                    BotonPlano(acciones, text=f"▸ {txt}", command=cmd, bg=AZUL,
                               fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                               font=(FUENTE_SISTEMA, 10, "bold"), padx=10,
                               pady=BTN_PADY).pack(side="left", padx=4)
                 else:
-                    tk.Button(acciones, text=txt, command=cmd, bg=BLANCO, fg=AZUL,
+                    BotonPlano(acciones, text=txt, command=cmd, bg=BLANCO, fg=AZUL,
                               activebackground="#E8EEF6", relief="flat",
                               highlightthickness=1, highlightbackground=GRIS_BORDE,
                               font=(FUENTE_SISTEMA, 10), padx=10,
@@ -8996,7 +9121,7 @@ if TK_DISPONIBLE:
                 fila = tk.Frame(self._graf_caja, bg=BLANCO)
                 fila.pack(anchor="w", padx=16, pady=(0, 12))
                 for txt, cmd in ctas:
-                    tk.Button(fila, text=txt, command=cmd, bg=AZUL, fg=TEXTO_CLARO,
+                    BotonPlano(fila, text=txt, command=cmd, bg=AZUL, fg=TEXTO_CLARO,
                               activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 10),
                               padx=10, pady=BTN_PADY).pack(side="left", padx=(0, 8))
 
@@ -9245,7 +9370,7 @@ if TK_DISPONIBLE:
                         ok, msg = validar_curp(self.reg_vars[vkey].get().strip())
                         (messagebox.showinfo if ok else messagebox.showwarning)(
                             "CURP", msg)
-                    tk.Button(campos, text="Validar", command=_validar_curp_ui,
+                    BotonPlano(campos, text="Validar", command=_validar_curp_ui,
                               bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                               font=(FUENTE_SISTEMA, 9)).grid(row=i, column=2, padx=(6, 0))
             # Indicador en vivo: ya puedes registrar / homonima detectada (ADR-0041)
@@ -9285,11 +9410,11 @@ if TK_DISPONIBLE:
 
             btns = tk.Frame(self.reg_frame, bg=CREMA_CLARO)
             btns.grid(row=5, column=0, sticky="we", padx=30, pady=16)
-            tk.Button(btns, text="Guardar y crear expediente", command=self._guardar_paso1,
+            BotonPlano(btns, text="Guardar y crear expediente", command=self._guardar_paso1,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                       font=(FUENTE_SISTEMA, 11, "bold"), padx=12, pady=6
                       ).pack(side="right", padx=6)
-            tk.Button(btns, text="Cancelar", command=lambda: self.show_page("home"),
+            BotonPlano(btns, text="Cancelar", command=lambda: self.show_page("home"),
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                       font=(FUENTE_SISTEMA, 10), padx=12, pady=6).pack(side="right")
 
@@ -9469,11 +9594,11 @@ if TK_DISPONIBLE:
                                self.reg_vars[k].get().upper()))
             btns = tk.Frame(self.reg_frame, bg=CREMA_CLARO)
             btns.grid(row=3, column=0, sticky="we", padx=30, pady=16)
-            tk.Button(btns, text="Guardar datos", command=self._guardar_paso2,
+            BotonPlano(btns, text="Guardar datos", command=self._guardar_paso2,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                       font=(FUENTE_SISTEMA, 11, "bold"), padx=12, pady=6
                       ).pack(side="right", padx=6)
-            tk.Button(btns, text="Omitir", command=self.ir_a_documentos,
+            BotonPlano(btns, text="Omitir", command=self.ir_a_documentos,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                       font=(FUENTE_SISTEMA, 10), padx=12, pady=6).pack(side="right")
 
@@ -9528,7 +9653,7 @@ if TK_DISPONIBLE:
 
             def _btn_epi(parent, texto, cmd, padx=4):
                 # secundario fantasma: no compite con el primario de generar (U74)
-                return tk.Button(parent, text=texto, command=cmd, bg=BLANCO,
+                return BotonPlano(parent, text=texto, command=cmd, bg=BLANCO,
                                  fg=AZUL, activebackground=AZUL_CHIP, relief="flat",
                                  highlightthickness=1, highlightbackground=GRIS_BORDE,
                                  font=(FUENTE_SISTEMA, 9), padx=8, pady=3, cursor="hand2")
@@ -9583,7 +9708,7 @@ if TK_DISPONIBLE:
             fila_cambio = tk.Frame(tab_pac, bg=CREMA_CLARO)
             fila_cambio.grid(row=2, column=0, columnspan=2, sticky="we",
                              padx=10, pady=(4, 2))
-            self.docs_sel_btn = tk.Button(
+            self.docs_sel_btn = BotonPlano(
                 fila_cambio, text="▸ Elegir paciente",
                 command=self._alternar_selector_docs, bg=BLANCO, fg=AZUL,
                 activebackground=AZUL_CHIP, relief="flat", highlightthickness=1,
@@ -9633,7 +9758,7 @@ if TK_DISPONIBLE:
             self.entry_busq_docs.grid(row=0, column=0, sticky="we", padx=(0, 6))
             self.entry_busq_docs.bind("<Return>",
                                       lambda e: self._buscar_en_docs())
-            tk.Button(marco_busq, text="Buscar", command=self._buscar_en_docs,
+            BotonPlano(marco_busq, text="Buscar", command=self._buscar_en_docs,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER
                       ).grid(row=0, column=1, padx=3)
             marco_res = tk.Frame(self.docs_sel_frame, bg=BLANCO, highlightthickness=1,
@@ -9677,7 +9802,7 @@ if TK_DISPONIBLE:
             fila_acc = tk.Frame(tab_pac, bg=CREMA_CLARO)
             fila_acc.grid(row=4, column=0, columnspan=2, sticky="we",
                           padx=10, pady=(8, 6))
-            tk.Button(fila_acc, text="Generar y abrir documento",
+            BotonPlano(fila_acc, text="Generar y abrir documento",
                       command=self._generar_docs, bg=AZUL, fg=TEXTO_CLARO,
                       activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 11, "bold"),
                       padx=10, pady=6).pack(side="left", padx=4)
@@ -9693,7 +9818,7 @@ if TK_DISPONIBLE:
                     ("Ficha", self._ficha_de_docs),
                     ("Consentimiento", self._dlg_consentimiento),
                     ("Historia (NOM-004)", self._dlg_nom004)]:
-                bb = tk.Button(fila_acc, text=txt, command=cmd, bg=GRIS_SECUNDARIO,
+                bb = BotonPlano(fila_acc, text=txt, command=cmd, bg=GRIS_SECUNDARIO,
                                fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
                                font=(FUENTE_SISTEMA, 10), padx=10, pady=6)
                 bb.pack(side="left", padx=4)
@@ -9718,7 +9843,7 @@ if TK_DISPONIBLE:
                                                 selectbackground=AZUL,
                                                 selectforeground=TEXTO_CLARO)
             self.lb_plantillas_sin.grid(row=3, column=0, sticky="nsew", padx=12, pady=3)
-            tk.Button(tab_sin, text="Generar documento general",
+            BotonPlano(tab_sin, text="Generar documento general",
                       command=self._generar_sin_paciente, bg=AZUL, fg=TEXTO_CLARO,
                       activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 11),
                       pady=6).grid(row=4, column=0, pady=12)
@@ -9754,7 +9879,7 @@ if TK_DISPONIBLE:
                              ("Abrir plantilla", self._abrir_tpl),
                              ("Nueva plantilla (.txt)", self._nueva_plantilla),
                              ("Recargar lista", self._recargar_tpls)]:
-                tk.Button(fila_b, text=txt, command=cmd, bg=AZUL, fg=TEXTO_CLARO,
+                BotonPlano(fila_b, text=txt, command=cmd, bg=AZUL, fg=TEXTO_CLARO,
                           activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 9),
                           padx=8, pady=4).pack(side="left", padx=4)
             tk.Label(tab_tpl,
@@ -9973,11 +10098,11 @@ if TK_DISPONIBLE:
 
             pie = tk.Frame(marco, bg=CREMA_CLARO)
             pie.pack(fill="x", pady=(14, 0))
-            tk.Button(pie, text="Crear episodio", command=_crear, bg=AZUL,
+            BotonPlano(pie, text="Crear episodio", command=_crear, bg=AZUL,
                       fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                       font=(FUENTE_SISTEMA, 11, "bold"), padx=10, pady=6
                       ).pack(side="right", padx=4)
-            tk.Button(pie, text="Cancelar", command=win.destroy, bg=GRIS_SECUNDARIO,
+            BotonPlano(pie, text="Cancelar", command=win.destroy, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
                       padx=10, pady=6).pack(side="right")
             e_ref.bind("<Return>", lambda ev: e_fum.focus_set())
@@ -10030,7 +10155,7 @@ if TK_DISPONIBLE:
                                      "instala Vosk: pip install vosk",
                          bg=CREMA_CLARO, fg=TEXTO_OSCURO, wraplength=400,
                          justify="left", font=(FUENTE_SISTEMA, 10)).pack(anchor="w", pady=6)
-            tk.Button(marco, text="Cerrar", command=win.destroy, bg=GRIS_SECUNDARIO,
+            BotonPlano(marco, text="Cerrar", command=win.destroy, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO, padx=10, pady=6
                       ).pack(anchor="e", pady=8)
             auto_tamano(win, self)
@@ -10191,14 +10316,14 @@ if TK_DISPONIBLE:
             e_fum.bind("<Return>", lambda ev: _actualizar_calc())
             pie = tk.Frame(marco, bg=CREMA_CLARO)
             pie.pack(fill="x", pady=(14, 0))
-            tk.Button(pie, text="Guardar", command=_guardar, bg=AZUL,
+            BotonPlano(pie, text="Guardar", command=_guardar, bg=AZUL,
                       fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                       font=(FUENTE_SISTEMA, 11, "bold"), padx=10, pady=6
                       ).pack(side="right", padx=4)
-            tk.Button(pie, text="Limpiar FUM", command=_limpiar_fum, bg=GRIS_SECUNDARIO,
+            BotonPlano(pie, text="Limpiar FUM", command=_limpiar_fum, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
                       padx=8, pady=6).pack(side="right", padx=4)
-            tk.Button(pie, text="Cerrar", command=win.destroy, bg=GRIS_SECUNDARIO,
+            BotonPlano(pie, text="Cerrar", command=win.destroy, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
                       padx=8, pady=6).pack(side="right")
             e_fum.focus_set()
@@ -10399,10 +10524,10 @@ if TK_DISPONIBLE:
             e.bind("<Return>", crear)
             fila = tk.Frame(marco, bg=CREMA_CLARO)
             fila.pack(fill="x", pady=(12, 0))
-            tk.Button(fila, text="Crear", command=crear, bg=AZUL, fg=TEXTO_CLARO,
+            BotonPlano(fila, text="Crear", command=crear, bg=AZUL, fg=TEXTO_CLARO,
                       activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 11, "bold"),
                       padx=10, pady=5).pack(side="right", padx=4)
-            tk.Button(fila, text="Cancelar", command=win.destroy, bg=GRIS_SECUNDARIO,
+            BotonPlano(fila, text="Cancelar", command=win.destroy, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO,
                       padx=8, pady=5).pack(side="right")
             auto_tamano(win, self)
@@ -10449,7 +10574,7 @@ if TK_DISPONIBLE:
                 else:
                     messagebox.showerror("Error", msg)
 
-            tk.Button(marco, text="Generar consentimiento", command=generar,
+            BotonPlano(marco, text="Generar consentimiento", command=generar,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                       font=(FUENTE_SISTEMA, 11, "bold"), pady=6).pack(anchor="e", pady=10)
             e.bind("<Return>", lambda ev: generar())
@@ -10526,7 +10651,7 @@ if TK_DISPONIBLE:
                 txt.insert("1.0", texto)
                 txt.config(state="disabled")
                 txt.pack(fill="both", expand=True, pady=6)
-                tk.Button(caja, text="Cerrar vista previa", command=vw.destroy,
+                BotonPlano(caja, text="Cerrar vista previa", command=vw.destroy,
                           bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO,
                           activebackground=GRIS_APAGADO, padx=10, pady=6
                           ).pack(anchor="e")
@@ -10556,19 +10681,19 @@ if TK_DISPONIBLE:
             fila_btns = tk.Frame(marco, bg=CREMA_CLARO)
             fila_btns.grid(row=11, column=0, columnspan=2, sticky="we", pady=10)
             # ADR-0040: dictado de voz para campos narrativos
-            tk.Button(fila_btns, text="Dictar (voz)", command=lambda: self._dictar(),
+            BotonPlano(fila_btns, text="Dictar (voz)", command=lambda: self._dictar(),
                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO,
                       activebackground=GRIS_APAGADO, font=(FUENTE_SISTEMA, 9),
                       padx=8, pady=6).pack(side="left", padx=4)
-            tk.Button(fila_btns, text="Vista previa", command=vista_previa,
+            BotonPlano(fila_btns, text="Vista previa", command=vista_previa,
                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO,
                       activebackground=GRIS_APAGADO, font=(FUENTE_SISTEMA, 10),
                       padx=10, pady=6).pack(side="left", padx=4)
-            tk.Button(fila_btns, text="Abrir ultima historia", command=abrir_ultima,
+            BotonPlano(fila_btns, text="Abrir ultima historia", command=abrir_ultima,
                       bg=GRIS_SECUNDARIO, fg=TEXTO_CLARO,
                       activebackground=GRIS_APAGADO, font=(FUENTE_SISTEMA, 10),
                       padx=10, pady=6).pack(side="left", padx=4)
-            tk.Button(fila_btns, text="Generar historia clinica", command=generar,
+            BotonPlano(fila_btns, text="Generar historia clinica", command=generar,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                       font=(FUENTE_SISTEMA, 11, "bold"), pady=6
                       ).pack(side="right", padx=4)
@@ -10626,7 +10751,7 @@ if TK_DISPONIBLE:
                 (col2, "Ayuda", self._ayuda),
             ]
             for col, txt, cmd in botones:
-                tk.Button(col, text=txt, command=cmd, bg=AZUL, fg=TEXTO_CLARO,
+                BotonPlano(col, text=txt, command=cmd, bg=AZUL, fg=TEXTO_CLARO,
                           activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 10),
                           anchor="w", padx=12, pady=6).pack(fill="x", pady=3)
             tk.Label(admin,
@@ -10692,7 +10817,7 @@ if TK_DISPONIBLE:
                     win.destroy()
 
             e.bind("<Return>", lambda ev: guardar())
-            tk.Button(marco, text="Guardar", command=guardar, bg=AZUL, fg=TEXTO_CLARO,
+            BotonPlano(marco, text="Guardar", command=guardar, bg=AZUL, fg=TEXTO_CLARO,
                       activebackground=AZUL_HOVER).pack(anchor="e")
             e.focus_set()
             e.select_range(0, "end")
@@ -10787,10 +10912,10 @@ if TK_DISPONIBLE:
                     messagebox.showerror("Export anonimizado", msg, parent=win)
             pie = tk.Frame(marco, bg=CREMA_CLARO)
             pie.pack(fill="x", pady=(8, 0))
-            tk.Button(pie, text="Cerrar", command=win.destroy, bg=GRIS_SECUNDARIO,
+            BotonPlano(pie, text="Cerrar", command=win.destroy, bg=GRIS_SECUNDARIO,
                       fg=TEXTO_CLARO, activebackground=GRIS_APAGADO, padx=10, pady=6
                       ).pack(side="right")
-            tk.Button(pie, text="Generar export anonimizado", command=_generar,
+            BotonPlano(pie, text="Generar export anonimizado", command=_generar,
                       bg=AZUL, fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                       font=(FUENTE_SISTEMA, 11, "bold"), padx=12, pady=6
                       ).pack(side="right", padx=6)
@@ -10845,7 +10970,7 @@ if TK_DISPONIBLE:
                     win.destroy()
                 else:
                     messagebox.showerror("Error", msg, parent=win)
-            tk.Button(marco, text="Importar", command=_importar, bg=AZUL, fg=TEXTO_CLARO,
+            BotonPlano(marco, text="Importar", command=_importar, bg=AZUL, fg=TEXTO_CLARO,
                       activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 11, "bold"),
                       padx=12, pady=6).pack(anchor="e", pady=10)
             auto_tamano(win, self)
@@ -10905,7 +11030,7 @@ if TK_DISPONIBLE:
                     d.destroy()
                 else:
                     messagebox.showerror("Error", msg, parent=d)
-            tk.Button(marco, text="Fusionar", command=_fusionar, bg=ROJO_AVISO,
+            BotonPlano(marco, text="Fusionar", command=_fusionar, bg=ROJO_AVISO,
                       fg=TEXTO_CLARO, activebackground="#C43A4B",
                       font=(FUENTE_SISTEMA, 11, "bold"), padx=12, pady=6).pack(anchor="e", pady=10)
             auto_tamano(d, self)
@@ -10977,11 +11102,11 @@ if TK_DISPONIBLE:
 
             fila = tk.Frame(marco, bg=CREMA_CLARO)
             fila.pack(fill="x", pady=(12, 0))
-            tk.Button(fila, text="Guardar PIN", command=guardar, bg=AZUL,
+            BotonPlano(fila, text="Guardar PIN", command=guardar, bg=AZUL,
                       fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                       font=(FUENTE_SISTEMA, 11, "bold")).pack(side="left")
             if activo:
-                tk.Button(fila, text="Quitar PIN", command=quitar, bg=GRIS_SECUNDARIO,
+                BotonPlano(fila, text="Quitar PIN", command=quitar, bg=GRIS_SECUNDARIO,
                           fg=TEXTO_CLARO, activebackground=GRIS_APAGADO
                           ).pack(side="left", padx=8)
             for e in (e_actual, e_nuevo, e_rep):
@@ -11079,7 +11204,7 @@ if TK_DISPONIBLE:
                     e_dest.delete(0, "end")
                     e_dest.insert(0, d)
 
-            tk.Button(fila, text="Examinar...", command=examinar, bg=AZUL,
+            BotonPlano(fila, text="Examinar...", command=examinar, bg=AZUL,
                       fg=TEXTO_CLARO, activebackground=AZUL_HOVER).pack(side="left")
             # P1 (T9b): contraseña opcional — cifra al respaldar; exige al
             # verificar/restaurar si el respaldo viene cifrado
@@ -11136,7 +11261,7 @@ if TK_DISPONIBLE:
                 threading.Thread(target=worker, daemon=True).start()
                 self._poll_respaldo(q, win, lbl_est, btn_ejec, m, destino)
 
-            btn_ejec = tk.Button(marco, text="Ejecutar", command=ejecutar, bg=AZUL,
+            btn_ejec = BotonPlano(marco, text="Ejecutar", command=ejecutar, bg=AZUL,
                                  fg=TEXTO_CLARO, activebackground=AZUL_HOVER,
                                  font=(FUENTE_SISTEMA, 11, "bold"), pady=6)
             btn_ejec.pack(anchor="e", pady=8)
@@ -11229,7 +11354,7 @@ def pedir_pin(intentos_max=5):
         else:
             lbl.config(text=f"PIN incorrecto. Intentos: {estado['restantes']}")
 
-    tk.Button(marco, text="Entrar", command=intentar, bg=AZUL, fg=TEXTO_CLARO,
+    BotonPlano(marco, text="Entrar", command=intentar, bg=AZUL, fg=TEXTO_CLARO,
               activebackground=AZUL_HOVER, font=(FUENTE_SISTEMA, 11, "bold")
               ).pack(anchor="e")
     e.bind("<Return>", intentar)
